@@ -259,134 +259,93 @@ def accueil(request):
     
     return render(request, 'presence/accueil.html', context)
 
+def _resoudre_uid(uid):
+    """Résoudre un UID NFC : badge visiteur → utilisateur → inconnu.
+    Retourne un dict prêt pour JsonResponse.
+    """
+    # 1) Badge visiteur
+    badge = BadgeVisiteur.objects.select_related('affecte_a').filter(uid_carte__iexact=uid).first()
+    if badge is not None:
+        if badge.affecte_a is None:
+            return {'success': True, 'action': 'visiteur_affectation', 'uid': uid,
+                    'reader_connected': True, 'message': 'Badge visiteur non affecté'}
+        utilisateur = badge.affecte_a
+        if utilisateur.blackliste:
+            logger.warning(f"BLACKLIST (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'blacklist', 'reader_connected': True,
+                    'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+        if utilisateur.statut_validation == 'EN_ATTENTE':
+            logger.warning(f"EN_ATTENTE (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'en_attente', 'reader_connected': True,
+                    'message': f"Utilisateur en attente de validation: {utilisateur.prenom} {utilisateur.nom}",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+        if utilisateur.present:
+            utilisateur.present = False
+            utilisateur.save()
+            HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
+            logger.info(f"SORTIE (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'sortie', 'reader_connected': True,
+                    'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+        utilisateur.present = True
+        utilisateur.save()
+        HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
+        logger.info(f"ENTREE (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+        return {'success': True, 'action': 'entree', 'reader_connected': True,
+                'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé",
+                'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+
+    # 2) Carte personnelle d'un utilisateur
+    utilisateur = Utilisateur.objects.filter(uid_carte__iexact=uid).first()
+    if utilisateur is not None:
+        if utilisateur.blackliste:
+            logger.warning(f"BLACKLIST: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'blacklist', 'reader_connected': True,
+                    'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'societe_raison': utilisateur.societe_raison}}
+        if utilisateur.statut_validation == 'EN_ATTENTE':
+            logger.warning(f"EN_ATTENTE: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'en_attente', 'reader_connected': True,
+                    'message': f"Utilisateur en attente de validation: {utilisateur.prenom} {utilisateur.nom}",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'societe_raison': utilisateur.societe_raison}}
+        if utilisateur.present:
+            utilisateur.present = False
+            utilisateur.save()
+            HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
+            logger.info(f"SORTIE: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+            return {'success': True, 'action': 'sortie', 'reader_connected': True,
+                    'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux",
+                    'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+        utilisateur.present = True
+        utilisateur.save()
+        HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
+        logger.info(f"ENTREE: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
+        return {'success': True, 'action': 'entree', 'reader_connected': True,
+                'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé",
+                'utilisateur': {'nom': utilisateur.nom, 'prenom': utilisateur.prenom, 'entreprise': utilisateur.societe_raison}}
+
+    # 3) Carte totalement inconnue
+    logger.info(f"CARTE INCONNUE détectée UID={uid}")
+    return {'success': True, 'action': 'lier_badge_utilisateur', 'uid': uid,
+            'reader_connected': True, 'message': 'Badge inconnu - veuillez le lier à un utilisateur'}
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def lire_carte_nfc(request):
     """Endpoint pour lire une carte NFC"""
     global nfc_service
-    
+
     try:
         if nfc_service is None:
             nfc_service = get_nfc_service()
-        
-        # Lire l'UID de la carte
         uid = nfc_service.lire_carte()
-        
         if uid:
-            # 1) Traiter d'abord comme badge visiteur
-            try:
-                badge = BadgeVisiteur.objects.select_related('affecte_a').filter(uid_carte__iexact=uid).first()
-                if badge.affecte_a is None:
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'visiteur_affectation',
-                        'uid': uid,
-                        'reader_connected': True,
-                        'message': 'Badge visiteur non affecté'
-                    })
-                utilisateur = badge.affecte_a
-                if getattr(utilisateur, 'blackliste', False):
-                    logger.warning(f"BLACKLIST (visiteur): Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'blacklist',
-                        'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                # Vérifier le statut de validation pour les badges visiteurs
-                if getattr(utilisateur, 'statut_validation', 'VALIDE') == 'EN_ATTENTE':
-                    logger.warning(f"EN_ATTENTE (visiteur): Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'en_attente',
-                        'message': f"Utilisateur en attente de validation: {utilisateur.prenom} {utilisateur.nom}",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                if utilisateur.present:
-                    utilisateur.present = False
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'sortie',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux"
-                    })
-                else:
-                    utilisateur.present = True
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'entree',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé"
-                    })
-            except Exception:
-                pass
-
-            # 2) Sinon, badge personnel d'un utilisateur
-            try:
-                utilisateur = Utilisateur.objects.filter(uid_carte__iexact=uid).first()
-                if getattr(utilisateur, 'blackliste', False):
-                    logger.warning(f"BLACKLIST: Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'blacklist',
-                        'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}"
-                    })
-                # Vérifier le statut de validation
-                if getattr(utilisateur, 'statut_validation', 'VALIDE') == 'EN_ATTENTE':
-                    logger.warning(f"EN_ATTENTE: Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'en_attente',
-                        'message': f"Utilisateur en attente de validation: {utilisateur.prenom} {utilisateur.nom}"
-                    })
-                if utilisateur.present:
-                    utilisateur.present = False
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'sortie',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux"
-                    })
-                else:
-                    utilisateur.present = True
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'entree',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé"
-                    })
-            except Exception:
-                return JsonResponse({
-                    'success': True,
-                    'action': 'lier_badge_utilisateur',
-                    'uid': uid,
-                    'message': 'Badge inconnu - veuillez le lier à un utilisateur'
-                })
-        else:
-            return JsonResponse({
-                'success': False,
-                'message': 'Aucune carte détectée'
-            })
-            
+            return JsonResponse(_resoudre_uid(uid))
+        return JsonResponse({'success': False, 'message': 'Aucune carte détectée'})
     except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'message': f'Erreur de lecture NFC: {str(e)}'
-        })
+        return JsonResponse({'success': False, 'message': f'Erreur de lecture NFC: {str(e)}'})
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -478,219 +437,119 @@ def refuser_utilisateur(request, user_id):
             'message': f'Erreur lors du refus: {str(e)}'
         })
 
+def _import_excel_core(request, statut_validation='VALIDE'):
+    """Logique commune d'import Excel.
+    statut_validation : 'VALIDE' (import direct) ou 'EN_ATTENTE' (import en attente de validation).
+    En-têtes attendus (insensibles à la casse) :
+      uid_carte (optionnel), nom, prenom, date_naissance, lieu_naissance,
+      departement_pays, nationalite, societe_raison
+    """
+    file = request.FILES.get('file')
+    server_path = request.POST.get('path', '').strip()
+    if not file and not server_path:
+        return JsonResponse({'success': False, 'message': 'Aucun fichier fourni'})
+
+    if file:
+        wb = load_workbook(filename=file, data_only=True)
+    else:
+        if not os.path.exists(server_path):
+            return JsonResponse({'success': False, 'message': 'Chemin de fichier introuvable'})
+        wb = load_workbook(filename=server_path, data_only=True)
+
+    ws = wb.active
+    headers = {}
+    for idx, cell in enumerate(ws[1], start=1):
+        key = str(cell.value or '').strip().lower()
+        if key:
+            headers[key] = idx
+
+    required = ['nom', 'prenom', 'date_naissance', 'lieu_naissance', 'departement_pays', 'nationalite', 'societe_raison']
+    missing = [h for h in required if h not in headers]
+    if missing:
+        return JsonResponse({'success': False, 'message': f'Colonnes manquantes: {", ".join(missing)}'})
+
+    def parse_date(val):
+        if val is None:
+            raise ValueError('Date manquante')
+        if isinstance(val, datetime):
+            return val.date().isoformat()
+        s = str(val).strip()
+        if not s:
+            raise ValueError('Date vide')
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+            try:
+                return datetime.strptime(s, fmt).date().isoformat()
+            except Exception:
+                pass
+        raise ValueError(f'Date invalide: {s}')
+
+    created = 0
+    updated = 0
+    errors = []
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        try:
+            get = lambda name: r[headers[name]-1] if name in headers else None
+            uid_raw = str(get('uid_carte') or '').strip()
+            if not uid_raw:
+                uid_raw = ('I' + uuid.uuid4().hex)[:32]
+            uid_raw = uid_raw.upper()
+            payload = {
+                'uid_carte': uid_raw,
+                'nom': str(get('nom') or '').strip(),
+                'prenom': str(get('prenom') or '').strip(),
+                'date_naissance': parse_date(get('date_naissance')),
+                'lieu_naissance': str(get('lieu_naissance') or '').strip(),
+                'departement_pays': str(get('departement_pays') or '').strip(),
+                'nationalite': str(get('nationalite') or '').strip(),
+                'societe_raison': str(get('societe_raison') or '').strip(),
+                'statut_validation': statut_validation,
+            }
+            try:
+                with transaction.atomic():
+                    u = Utilisateur.objects.select_for_update().get(uid_carte=uid_raw)
+                    for k, v in payload.items():
+                        if k != 'uid_carte':
+                            setattr(u, k, v)
+                    u.save()
+                    updated += 1
+            except Utilisateur.DoesNotExist:
+                try:
+                    with transaction.atomic():
+                        Utilisateur.objects.create(**payload)
+                        created += 1
+                except IntegrityError:
+                    updated += 1
+        except Exception as e:
+            errors.append(str(e))
+
+    label = "en attente" if statut_validation == 'EN_ATTENTE' else "terminé"
+    return JsonResponse({
+        'success': True, 'created': created, 'updated': updated, 'errors': errors,
+        'message': f"Import {label}: {created} créé(s), {updated} mis à jour"
+    })
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def import_utilisateurs_excel(request):
-    """Importer des utilisateurs depuis un fichier Excel.
-    Attendu: feuille active avec en-têtes (insensibles à la casse):
-      uid_carte, nom, prenom, date_naissance, lieu_naissance,
-      departement_pays, nationalite, societe_raison
-    - `uid_carte` peut être vide: un UID synthétique sera généré.
-    - `date_naissance` au format YYYY-MM-DD ou DD/MM/YYYY.
-    """
+    """Importer des utilisateurs validés depuis un fichier Excel."""
     if not get_admin_status(request):
         return JsonResponse({'success': False, 'message': 'Accès refusé - Administrateur requis'})
-
     try:
-        # Support soit upload multipart (file), soit chemin serveur (path)
-        file = request.FILES.get('file')
-        server_path = request.POST.get('path', '').strip()
-        if not file and not server_path:
-            return JsonResponse({'success': False, 'message': 'Aucun fichier fourni'})
-
-        if file:
-            wb = load_workbook(filename=file, data_only=True)
-        else:
-            if not os.path.exists(server_path):
-                return JsonResponse({'success': False, 'message': 'Chemin de fichier introuvable'})
-            wb = load_workbook(filename=server_path, data_only=True)
-
-        ws = wb.active
-
-        # Lire en-têtes
-        headers = {}
-        for idx, cell in enumerate(ws[1], start=1):
-            key = str(cell.value or '').strip().lower()
-            if key:
-                headers[key] = idx
-
-        required = ['nom', 'prenom', 'date_naissance', 'lieu_naissance', 'departement_pays', 'nationalite', 'societe_raison']
-        missing = [h for h in required if h not in headers]
-        # `uid_carte` est optionnel
-        if missing:
-            return JsonResponse({'success': False, 'message': f'Colonnes manquantes: {", ".join(missing)}'})
-
-        def parse_date(val):
-            if val is None:
-                raise ValueError('Date manquante')
-            if isinstance(val, datetime):
-                return val.date().isoformat()
-            s = str(val).strip()
-            if not s:
-                raise ValueError('Date vide')
-            # Essayer YYYY-MM-DD puis DD/MM/YYYY
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
-                try:
-                    return datetime.strptime(s, fmt).date().isoformat()
-                except Exception:
-                    pass
-            raise ValueError(f'Date invalide: {s}')
-
-        created = 0
-        updated = 0
-        errors = []
-        for r in ws.iter_rows(min_row=2, values_only=True):
-            try:
-                get = lambda name: r[headers[name]-1] if name in headers else None
-                uid_raw = str(get('uid_carte') or '').strip()
-                if not uid_raw:
-                    uid_raw = ('I' + uuid.uuid4().hex)[:32]
-                uid_raw = uid_raw.upper()
-
-                payload = {
-                    'uid_carte': uid_raw,
-                    'nom': str(get('nom') or '').strip(),
-                    'prenom': str(get('prenom') or '').strip(),
-                    'date_naissance': parse_date(get('date_naissance')),
-                    'lieu_naissance': str(get('lieu_naissance') or '').strip(),
-                    'departement_pays': str(get('departement_pays') or '').strip(),
-                    'nationalite': str(get('nationalite') or '').strip(),
-                    'societe_raison': str(get('societe_raison') or '').strip(),
-                }
-
-                # Si uid existe déjà: mettre à jour les infos (hors statuts)
-                try:
-                    with transaction.atomic():
-                        u = Utilisateur.objects.select_for_update().get(uid_carte=uid_raw)
-                        for k, v in payload.items():
-                            if k != 'uid_carte':
-                                setattr(u, k, v)
-                        u.save()
-                        updated += 1
-                except Utilisateur.DoesNotExist:
-                    try:
-                        with transaction.atomic():
-                            Utilisateur.objects.create(**payload)
-                            created += 1
-                    except IntegrityError:
-                        # UID a été créé en parallèle; considérer comme mis à jour
-                        updated += 1
-            except Exception as e:
-                errors.append(str(e))
-
-        return JsonResponse({
-            'success': True,
-            'created': created,
-            'updated': updated,
-            'errors': errors,
-            'message': f"Import terminé: {created} créé(s), {updated} mis à jour"
-        })
-
+        return _import_excel_core(request, statut_validation='VALIDE')
     except Exception as e:
         logger.error(f"Import Excel échoué: {e}")
         return JsonResponse({'success': False, 'message': f'Erreur import: {e}'})
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def import_utilisateurs_attente_excel(request):
-    """Importer des utilisateurs EN ATTENTE depuis un fichier Excel.
-    Même format que import_utilisateurs_excel, mais avec statut_validation='EN_ATTENTE'.
-    """
+    """Importer des utilisateurs en attente de validation depuis un fichier Excel."""
     if not get_admin_status(request):
         return JsonResponse({'success': False, 'message': 'Accès refusé - Administrateur requis'})
-
     try:
-        file = request.FILES.get('file')
-        server_path = request.POST.get('path', '').strip()
-        if not file and not server_path:
-            return JsonResponse({'success': False, 'message': 'Aucun fichier fourni'})
-
-        if file:
-            wb = load_workbook(filename=file, data_only=True)
-        else:
-            if not os.path.exists(server_path):
-                return JsonResponse({'success': False, 'message': 'Chemin de fichier introuvable'})
-            wb = load_workbook(filename=server_path, data_only=True)
-
-        ws = wb.active
-
-        # Lire en-têtes
-        headers = {}
-        for idx, cell in enumerate(ws[1], start=1):
-            key = str(cell.value or '').strip().lower()
-            if key:
-                headers[key] = idx
-
-        required = ['nom', 'prenom', 'date_naissance', 'lieu_naissance', 'departement_pays', 'nationalite', 'societe_raison']
-        missing = [h for h in required if h not in headers]
-        if missing:
-            return JsonResponse({'success': False, 'message': f'Colonnes manquantes: {", ".join(missing)}'})
-
-        def parse_date(val):
-            if val is None:
-                raise ValueError('Date manquante')
-            if isinstance(val, datetime):
-                return val.date().isoformat()
-            s = str(val).strip()
-            if not s:
-                raise ValueError('Date vide')
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
-                try:
-                    return datetime.strptime(s, fmt).date().isoformat()
-                except Exception:
-                    pass
-            raise ValueError(f'Date invalide: {s}')
-
-        created = 0
-        updated = 0
-        errors = []
-        for r in ws.iter_rows(min_row=2, values_only=True):
-            try:
-                get = lambda name: r[headers[name]-1] if name in headers else None
-                uid_raw = str(get('uid_carte') or '').strip()
-                if not uid_raw:
-                    uid_raw = ('I' + uuid.uuid4().hex)[:32]
-                uid_raw = uid_raw.upper()
-
-                payload = {
-                    'uid_carte': uid_raw,
-                    'nom': str(get('nom') or '').strip(),
-                    'prenom': str(get('prenom') or '').strip(),
-                    'date_naissance': parse_date(get('date_naissance')),
-                    'lieu_naissance': str(get('lieu_naissance') or '').strip(),
-                    'departement_pays': str(get('departement_pays') or '').strip(),
-                    'nationalite': str(get('nationalite') or '').strip(),
-                    'societe_raison': str(get('societe_raison') or '').strip(),
-                    'statut_validation': 'EN_ATTENTE',  # Statut en attente
-                }
-
-                # Si uid existe déjà: mettre à jour les infos
-                try:
-                    with transaction.atomic():
-                        u = Utilisateur.objects.select_for_update().get(uid_carte=uid_raw)
-                        for k, v in payload.items():
-                            if k != 'uid_carte':
-                                setattr(u, k, v)
-                        u.save()
-                        updated += 1
-                except Utilisateur.DoesNotExist:
-                    try:
-                        with transaction.atomic():
-                            Utilisateur.objects.create(**payload)
-                            created += 1
-                    except IntegrityError:
-                        updated += 1
-            except Exception as e:
-                errors.append(str(e))
-
-        return JsonResponse({
-            'success': True,
-            'created': created,
-            'updated': updated,
-            'errors': errors,
-            'message': f"Import en attente terminé: {created} créé(s), {updated} mis à jour"
-        })
-
+        return _import_excel_core(request, statut_validation='EN_ATTENTE')
     except Exception as e:
         logger.error(f"Import Excel en attente échoué: {e}")
         return JsonResponse({'success': False, 'message': f'Erreur import: {e}'})
@@ -1371,140 +1230,7 @@ def ecoute_nfc_continue(request):
 
             # Nouvelle carte détectée (transition no-card -> card)
             last_seen_uid = uid
-            
-            # 1) Priorité au badge visiteur s'il existe
-            try:
-                badge = BadgeVisiteur.objects.select_related('affecte_a').filter(uid_carte__iexact=uid).first()
-                if badge.affecte_a is None:
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'visiteur_affectation',
-                        'uid': uid,
-                        'reader_connected': True,
-                        'message': 'Badge visiteur non affecté'
-                    })
-                utilisateur = badge.affecte_a
-                if getattr(utilisateur, 'blackliste', False):
-                    logger.warning(f"BLACKLIST (visiteur): Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'blacklist',
-                        'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                # Vérifier le statut de validation pour les badges visiteurs
-                if getattr(utilisateur, 'statut_validation', 'VALIDE') == 'EN_ATTENTE':
-                    logger.warning(f"EN_ATTENTE (visiteur): Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'en_attente',
-                        'message': f"Utilisateur en attente de validation: {utilisateur.prenom} {utilisateur.nom}",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                if utilisateur.present:
-                    utilisateur.present = False
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
-                    logger.info(f"SORTIE (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'sortie',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                else:
-                    utilisateur.present = True
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
-                    logger.info(f"ENTREE (visiteur): {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'entree',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-            except Exception:
-                pass
-
-            # 2) Sinon, traiter comme badge personnel d'un utilisateur
-            try:
-                utilisateur = Utilisateur.objects.filter(uid_carte__iexact=uid).first()
-                # Si utilisateur blacklisté, ne pas enregistrer de présence
-                if getattr(utilisateur, 'blackliste', False):
-                    logger.warning(f"BLACKLIST: Tentative par {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'blacklist',
-                        'message': f"Utilisateur blacklisté: {utilisateur.prenom} {utilisateur.nom}",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'societe_raison': utilisateur.societe_raison
-                        }
-                    })
-                if utilisateur.present:
-                    utilisateur.present = False
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='SORTIE')
-                    logger.info(f"SORTIE: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'sortie',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} a quitté les locaux",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-                else:
-                    utilisateur.present = True
-                    utilisateur.save()
-                    HistoriquePresence.objects.create(utilisateur=utilisateur, type_action='ENTREE')
-                    logger.info(f"ENTREE: {utilisateur.prenom} {utilisateur.nom} ({utilisateur.societe_raison}) - UID={uid}")
-                    return JsonResponse({
-                        'success': True,
-                        'action': 'entree',
-                        'message': f"{utilisateur.prenom} {utilisateur.nom} est arrivé",
-                        'reader_connected': True,
-                        'utilisateur': {
-                            'nom': utilisateur.nom,
-                            'prenom': utilisateur.prenom,
-                            'entreprise': utilisateur.societe_raison
-                        }
-                    })
-            except Exception:
-                # Carte totalement inconnue (ni badge visiteur ni utilisateur personnel)
-                logger.info(f"CARTE INCONNUE détectée UID={uid}")
-                return JsonResponse({
-                    'success': True,
-                    'action': 'lier_badge_utilisateur',
-                    'uid': uid,
-                    'reader_connected': True,
-                    'message': 'Badge inconnu - veuillez le lier à un utilisateur'
-                })
+            return JsonResponse(_resoudre_uid(uid))
         else:
             # Pas de carte détectée - réinitialiser l'état edge et retourner état d'attente
             if last_seen_uid is not None:
