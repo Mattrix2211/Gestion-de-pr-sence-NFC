@@ -1,0 +1,274 @@
+{% extends 'presence/base.html' %}
+
+{% block title %}Badges visiteurs - Gestion de Présence{% endblock %}
+{% block page_title %}Badges visiteurs{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <div class="card mb-4">
+      <div class="card-body py-3 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+        <div class="d-flex align-items-baseline gap-2">
+          <h5 class="mb-0 fw-semibold d-flex align-items-center">
+            <i class="fas fa-id-badge text-primary me-2"></i>
+            Badges visiteurs
+          </h5>
+          <small class="text-muted">{{ badges|length }} badge{{ badges|length|pluralize }}</small>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" id="btnInfoVisiteurs" title="Aide">
+            <i class="fas fa-info-circle"></i>
+          </button>
+          {% if is_admin %}
+          <button class="btn btn-primary btn-sm" id="btnScanAdd">
+            <i class="fas fa-qrcode"></i> Scanner et ajouter
+          </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        {% if badges %}
+        <div class="table-responsive">
+          <table class="table table-hover" id="visiteursTable">
+            <thead class="table-primary">
+              <tr>
+                <th>Badge</th>
+                <th>État</th>
+                <th>Affecté à</th>
+                <th>Société/Raison</th>
+                <th>Date d'attribution</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in badges %}
+              <tr>
+                <td>
+                  {% if b.nom %}<strong>{{ b.nom }}</strong>{% else %}<span class="text-muted">(Sans nom)</span>{% endif %}
+                  <div class="small text-muted">UID: <code>{{ b.uid_carte }}</code></div>
+                </td>
+                <td>
+                  {% if b.affecte_a %}
+                  <span class="badge bg-success"><i class="fas fa-user-check"></i> Affecté</span>
+                  {% else %}
+                  <span class="badge bg-secondary"><i class="fas fa-user"></i> Libre</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if b.affecte_a %}
+                    <strong>{{ b.affecte_a.prenom }} {{ b.affecte_a.nom }}</strong>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if b.affecte_a %}{{ b.affecte_a.societe_raison }}{% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if b.date_attribution %}
+                    {{ b.date_attribution|date:"d/m/Y H:i" }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="btn-group" role="group">
+                    {% if b.affecte_a %}
+                    <button class="btn btn-outline-warning btn-sm" data-id="{{ b.id }}" onclick="desaffecterBadge(this)">
+                      <i class="fas fa-user-slash"></i>
+                    </button>
+                    {% endif %}
+                    {% if is_admin %}
+                    <button class="btn btn-outline-danger btn-sm" data-id="{{ b.id }}" onclick="supprimerBadge(this)">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+          <i class="fas fa-id-badge fa-3x text-muted mb-3"></i>
+          <p class="text-muted">Aucun badge visiteur. Cliquez sur "Scanner et ajouter" pour enregistrer un badge.</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Scan/Add -->
+<div class="modal fade" id="scanAddModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-qrcode me-2"></i>Scanner un badge visiteur</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="scanState" class="d-flex align-items-center gap-2">
+          <div class="spinner-border spinner-border-sm text-primary"></div>
+          <div>
+            <strong>En attente d'un badge…</strong>
+            <div class="small text-muted">Approchez le badge du lecteur NFC</div>
+          </div>
+        </div>
+        <div id="scanResult" class="d-none">
+          <p class="mb-1">UID détecté: <code id="scanUid"></code></p>
+          <div class="mb-2">
+            <label class="form-label">Nom du badge (optionnel)</label>
+            <input type="text" class="form-control" id="scanName" placeholder="Ex: VISITEUR-01">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+        <button type="button" class="btn btn-primary d-none" id="btnAddBadge">Ajouter ce badge</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal d'information Badges visiteurs -->
+<div class="modal fade" id="infoVisiteursModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title d-flex align-items-center"><i class="fas fa-circle-info me-2"></i> Aide Badges visiteurs</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <h6>Ajouter un badge</h6>
+            <ul class="mb-0 ps-3">
+              <li>Cliquez sur <em>Scanner et ajouter</em> puis approchez le badge du lecteur.</li>
+              <li>Optionnel : donnez un <strong>nom</strong> au badge (affiché dans la liste).</li>
+              <li>Les badges visiteurs n’appartiennent à personne par défaut.</li>
+            </ul>
+          </div>
+          <div class="col-md-6">
+            <h6>Affecter un badge</h6>
+            <ul class="mb-0 ps-3">
+              <li>Depuis l’accueil: scannez un badge <strong>non affecté</strong> → popup d’affectation.</li>
+              <li>Vous pouvez <strong>créer un utilisateur</strong> sur le moment (sans carte personnelle).</li>
+              <li>L’affectation est <strong>autorisée aux non-admins</strong>. Cette page reste admin-only.</li>
+              <li><strong>Important</strong> : les utilisateurs <span class="text-danger fw-semibold">blacklistés</span> ne peuvent pas être affectés à un badge visiteur.</li>
+            </ul>
+          </div>
+          <div class="col-md-6">
+            <h6>Désaffecter / supprimer</h6>
+            <ul class="mb-0 ps-3">
+              <li>Bouton <em>Désaffecter</em> pour libérer le badge.</li>
+              <li>Bouton <em>Supprimer</em> pour retirer le badge de l’inventaire.</li>
+              <li>Un <strong>reset automatique</strong> désaffecte tous les badges chaque jour à 00:00.</li>
+            </ul>
+          </div>
+          <div class="col-md-6">
+            <h6>Bonnes pratiques</h6>
+            <ul class="mb-0 ps-3">
+              <li>Pour rompre l’attache d’une carte personnelle à un utilisateur: utilisez <em>Détacher la carte</em> dans <strong>Utilisateurs</strong>.</li>
+              <li>Donnez un nom aux badges visiteurs pour les identifier plus facilement.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+      </div>
+    </div>
+  </div>
+ </div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let scanTimer = null;
+
+async function pollUidOnce(){
+  try{
+    const res = await fetch('{% url "nfc_lire_uid" %}');
+    const data = await res.json();
+    if (data.success && data.uid){
+      document.getElementById('scanUid').textContent = data.uid;
+      document.getElementById('scanState').classList.add('d-none');
+      document.getElementById('scanResult').classList.remove('d-none');
+      document.getElementById('btnAddBadge').classList.remove('d-none');
+      document.getElementById('btnAddBadge').onclick = async function(){
+        try{
+          const nom = document.getElementById('scanName').value.trim();
+          const r = await makeAjaxRequest('{% url "visiteur_ajouter_badge" %}', 'POST', {uid: data.uid, nom});
+          const j = await r.json();
+          if (j.success){
+            showAlert(j.message, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('scanAddModal')).hide();
+            setTimeout(()=> location.reload(), 600);
+          } else {
+            showAlert(j.message, 'danger');
+          }
+        }catch(e){ showAlert('Erreur lors de l\'ajout', 'danger'); }
+      }
+      return; // stop
+    }
+    if (!data.success && data.reader_connected === false){
+      showAlert('Lecteur NFC déconnecté', 'danger');
+    }
+  }catch(e){ /* ignore */ }
+}
+
+function startScan(){
+  document.getElementById('scanState').classList.remove('d-none');
+  document.getElementById('scanResult').classList.add('d-none');
+  document.getElementById('btnAddBadge').classList.add('d-none');
+  scanTimer = setInterval(pollUidOnce, 1000);
+}
+function stopScan(){
+  if (scanTimer){ clearInterval(scanTimer); scanTimer=null; }
+}
+
+document.getElementById('btnScanAdd').addEventListener('click', function(){
+  const m = new bootstrap.Modal(document.getElementById('scanAddModal'), {backdrop:'static'});
+  m.show();
+  startScan();
+});
+
+document.getElementById('btnInfoVisiteurs').addEventListener('click', function(){
+  const m = new bootstrap.Modal(document.getElementById('infoVisiteursModal'));
+  m.show();
+});
+
+document.getElementById('scanAddModal').addEventListener('hidden.bs.modal', stopScan);
+
+async function supprimerBadge(btn){
+  const id = btn.getAttribute('data-id');
+  const ok = await showConfirm({title:'Supprimer le badge', message:"Supprimer ce badge visiteur ?", confirmText:'Supprimer', confirmVariant:'danger'});
+  if (!ok) return;
+  try{
+    const r = await makeAjaxRequest(`/api/visiteur/${id}/supprimer/`, 'POST');
+    const j = await r.json();
+    if (j.success){ showAlert(j.message, 'success'); setTimeout(()=> location.reload(), 600); }
+    else { showAlert(j.message, 'danger'); }
+  }catch(e){ showAlert('Erreur lors de la suppression', 'danger'); }
+}
+
+async function desaffecterBadge(btn){
+  const id = btn.getAttribute('data-id');
+  const ok = await showConfirm({title:'Désaffecter', message:"Retirer l\'utilisateur associé à ce badge ?", confirmText:'Désaffecter', confirmVariant:'warning'});
+  if (!ok) return;
+  try{
+    const r = await makeAjaxRequest(`/api/visiteur/${id}/desaffecter/`, 'POST');
+    const j = await r.json();
+    if (j.success){ showAlert(j.message, 'success'); setTimeout(()=> location.reload(), 600); }
+    else { showAlert(j.message, 'danger'); }
+  }catch(e){ showAlert('Erreur lors de la désaffectation', 'danger'); }
+}
+</script>
+{% endblock %}

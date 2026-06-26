@@ -1,0 +1,127 @@
+/* App High-Tech Theme Enhancements */
+
+:root {
+  --accent: #00e5ff; /* cyan neon */
+  --accent-2: #7c4dff; /* purple */
+  --glow: rgba(0, 229, 255, 0.35);
+}
+
+[data-bs-theme="dark"] {
+  --accent: #00e5ff;
+  --accent-2: #7c4dff;
+  --glow: rgba(0, 229, 255, 0.35);
+}
+
+/* Animated gradient background */
+body {
+  background: radial-gradient(1200px 600px at 10% -20%, rgba(124,77,255,0.10), transparent),
+              radial-gradient(1000px 500px at 110% 20%, rgba(0,229,255,0.10), transparent),
+              linear-gradient(180deg, rgba(0,0,0,0.00), rgba(0,0,0,0.00));
+  background-attachment: fixed;
+  animation: bgShift 18s ease-in-out infinite alternate;
+}
+
+@keyframes bgShift {
+  0% { background-position: 0 0, 100% 0, 0 0; }
+  100% { background-position: 10% 5%, 95% 15%, 0 0; }
+}
+
+/* Navbar gradient + glow */
+.navbar {
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  box-shadow: 0 6px 24px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  z-index: 1100; /* au-dessus du contenu animé */
+}
+
+.navbar .nav-link, .navbar .navbar-brand { text-shadow: 0 1px 0 rgba(0,0,0,0.2); }
+.navbar .nav-link:hover { filter: brightness(1.08); }
+
+/* Cards: glassmorphism + hover lift */
+.card {
+  background: rgba(255,255,255,0.65);
+  backdrop-filter: saturate(140%) blur(6px);
+  -webkit-backdrop-filter: saturate(140%) blur(6px);
+  border: 1px solid rgba(255,255,255,0.35) !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 1px 0 rgba(255,255,255,0.5) inset;
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+[data-bs-theme="dark"] .card {
+  background: rgba(18,18,24,0.55);
+  border-color: rgba(255,255,255,0.08) !important;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.03) inset;
+}
+.card:hover {
+  /* Préférence: pas d'effet de survol prononcé */
+  transform: none;
+}
+
+/* Buttons: subtle neon gradient + hover */
+.btn:not(.btn-link) {
+  position: relative;
+  transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+}
+.btn-primary, .btn-success, .btn-danger, .btn-warning, .btn-dark {
+  background-image: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.04));
+}
+.btn:hover:not(.btn-link) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12), 0 0 0 2px rgba(255,255,255,0.06) inset;
+}
+.btn:active:not(.btn-link) { transform: translateY(0); filter: brightness(.98); }
+
+/* Inputs: subtle focus (no neon) */
+.form-control, .form-select { transition: box-shadow .2s ease, border-color .2s ease; }
+.form-control:focus, .form-select:focus {
+  border-color: var(--bs-border-color) !important;
+  box-shadow: 0 0 0 .1rem rgba(0,0,0,0.06) !important; /* trait plus fin et plus léger */
+}
+
+/* Toasts: enhanced elevation */
+.toast { box-shadow: 0 14px 40px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.06) inset; }
+
+/* Icons: no neon hover anywhere (global off) */
+.fas, .far, .fa { transition: none; }
+.fas:hover, .far:hover, .fa:hover { text-shadow: none !important; filter: none !important; }
+/* Désactiver tout effet néon dans la navbar (hover/click) */
+.navbar .fas:hover, .navbar .far:hover, .navbar .fa:hover,
+.navbar .fas:active, .navbar .far:active, .navbar .fa:active {
+  text-shadow: none !important;
+  filter: none !important;
+}
+.navbar .nav-link:hover, .navbar .nav-link:active { filter: none !important; text-shadow: none !important; }
+
+/* Désactiver le néon sur les icônes d'information */
+.fa-info-circle, .fa-info, .fa-circle-info { text-shadow: none !important; filter: none !important; }
+.fa-info-circle:hover, .fa-info:hover, .fa-circle-info:hover { text-shadow: none !important; filter: none !important; }
+
+/* Input groups: remove any focus glow */
+.input-group:focus-within { box-shadow: none !important; }
+.input-group .input-group-text, .input-group .input-group-text i { text-shadow: none !important; filter: none !important; }
+
+/* Present counter gentle pulse */
+.present-counter { text-shadow: 0 0 12px rgba(40,167,69,0.35); animation: softPulse 3.2s ease-in-out infinite; }
+@keyframes softPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+
+/* (Retiré) animation de container qui créait un stacking context et gênait les dropdowns */
+
+/* Tables: header shine */
+thead.table-primary { background: linear-gradient(90deg, rgba(124,77,255,0.15), rgba(0,229,255,0.15)) !important; }
+
+/* Heatmap canvas anti-blur border removal (safety) */
+canvas { image-rendering: -webkit-optimize-contrast; }
+
+/* Theme toggle hover */
+#themeToggle:hover { box-shadow: none; }
+
+/* Dropdown menu styling */
+.dropdown-menu { border-radius: 12px; border-color: rgba(255,255,255,0.15); backdrop-filter: blur(8px); z-index: 1080; }
+[data-bs-theme="dark"] .dropdown-menu { background: rgba(22,22,28,0.92); }
+
+/* Small helper for badges */
+.badge { letter-spacing: .2px; }
+
+/* Page transition (fade between pages) */
+body.page-enter { animation: pageFadeIn .28s ease both; }
+body.page-leave { animation: pageFadeOut .18s ease forwards; }
+@keyframes pageFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pageFadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(4px); } }

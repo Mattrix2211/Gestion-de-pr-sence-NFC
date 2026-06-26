@@ -1,0 +1,13 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=nfc_presence.settings
+      - PYTHONUNBUFFERED=1
+      - NFC_BACKEND=agent
+      - NFC_AGENT_URL=http://host.docker.internal:8765
+    volumes:
+      - .:/app
+    command: /entrypoint.sh

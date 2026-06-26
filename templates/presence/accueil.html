@@ -1,0 +1,980 @@
+﻿{% extends 'presence/base.html' %}
+
+{% block title %}Accueil - Gestion de Présence{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex align-items-center justify-content-end mb-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#infoAppModal" title="Aide">
+                <i class="fas fa-info-circle"></i>
+            </button>
+        </div>
+        <!-- Bandeau d'attente NFC au-dessus de "Personnes présentes" -->
+        <div id="nfcWaitingBanner" class="alert alert-light border d-flex align-items-center gap-2 mb-3" role="alert">
+            <div class="status-icon">
+                <div class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></div>
+            </div>
+            <div class="status-text">
+                <strong>En attente d'une carte NFC</strong>
+                <div class="small text-muted">Approchez votre carte du lecteur pour badger</div>
+            </div>
+        </div>
+
+        <!-- Compteur de présences -->
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h2 class="card-title mb-3">
+                    <i class="fas fa-users text-primary me-2"></i>
+                    Personnes présentes
+                </h2>
+                <div class="present-counter" id="presentCounter">{{ nombre_presents }}</div>
+                <small class="text-muted">personnes actuellement présentes</small>
+            </div>
+        </div>
+
+        <!-- Tableau des personnes présentes -->
+        <div class="card">
+            <div class="card-header py-2">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <h5 class="mb-0 me-auto d-flex align-items-center">
+                        <i class="fas fa-list me-2"></i>
+                        Liste des présences
+                    </h5>
+                    <!-- Barre de recherche interactive -->
+                    <div class="ms-auto" style="min-width:280px;max-width:420px;">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" class="form-control" id="presenceSearch" placeholder="Filtrer nom, prénom, Société/Raison...">
+                            <button class="btn btn-outline-secondary" type="button" id="clearSearch" title="Effacer"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                    {% if is_admin %}
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="viderListePresences()">
+                        <i class="fas fa-broom"></i> Vider
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                {% if personnes_presentes %}
+                <div class="table-responsive">
+                    <table class="table table-hover" id="presenceTable">
+                        <thead class="table-primary">
+                            <tr>
+                                <th>Nom</th>
+                                <th>Prénom</th>
+                                <th>Société/Raison</th>
+                                <th>Heure d'arrivée</th>
+                                {% if is_admin %}
+                                <th class="text-center">Actions</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for personne in personnes_presentes %}
+                            <tr>
+                                <td>{{ personne.nom }}</td>
+                                <td>{{ personne.prenom }}</td>
+                                <td>{{ personne.societe_raison }}</td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if personne.heure_entree %}
+                                            {{ personne.heure_entree|date:"H:i" }}
+                                        {% else %}
+                                            --:--
+                                        {% endif %}
+                                    </small>
+                                </td>
+                                {% if is_admin %}
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" 
+                                            onclick="forcerSortie({{ personne.id }}, '{{ personne.prenom }}', '{{ personne.nom }}')"
+                                            title="Forcer la sortie">
+                                        <i class="fas fa-sign-out-alt"></i>
+                                    </button>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4">
+                    <i class="fas fa-user-slash fa-3x text-muted mb-3"></i>
+                    <p class="text-muted">Aucune personne présente actuellement</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour nouvel utilisateur -->
+<div class="modal fade" id="newUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-plus me-2"></i>
+                    Nouvel utilisateur détecté
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newUserForm">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Une nouvelle carte NFC a été détectée. Veuillez saisir les informations de l'utilisateur.
+                    </div>
+                    
+                    <input type="hidden" id="cardUid" name="uid">
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="nom" class="form-label">Nom *</label>
+                            <input type="text" class="form-control" id="nom" name="nom" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="prenom" class="form-label">Prénom *</label>
+                            <input type="text" class="form-control" id="prenom" name="prenom" required>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="date_naissance" class="form-label">Date de naissance *</label>
+                        <input type="date" class="form-control" id="date_naissance" name="date_naissance" required>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="lieu_naissance" class="form-label">Lieu de naissance *</label>
+                            <input type="text" class="form-control" id="lieu_naissance" name="lieu_naissance" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="departement_pays" class="form-label">Département/Pays *</label>
+                            <input type="text" class="form-control" id="departement_pays" name="departement_pays" required placeholder="Ex: 83/Var">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="nationalite" class="form-label">Nationalité *</label>
+                        <input type="text" class="form-control" id="nationalite" name="nationalite" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="societe_raison" class="form-label">Société/Raison de la visite *</label>
+                        <input type="text" class="form-control" id="societe_raison" name="societe_raison" required>
+                    </div>
+                    
+                    <small class="text-muted">* Tous les champs seront automatiquement convertis en majuscules</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save me-2"></i>
+                        Enregistrer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal d'information application -->
+<div class="modal fade" id="infoAppModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title d-flex align-items-center"><i class="fas fa-circle-info me-2"></i> Aide & Fonctionnement</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            </div>
+            <div class="modal-body">
+                {% if is_admin %}
+                <div class="alert alert-warning d-flex align-items-start gap-2">
+                    <i class="fas fa-user-shield mt-1"></i>
+                    <div>
+                        <strong>Mode Administrateur</strong><br>
+                        Vous disposez des fonctions avancées: gestion utilisateurs, historique, statistiques et paramètres.
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <h6 class="mb-2">Page d’accueil</h6>
+                        <ul class="mb-0 ps-3">
+                            <li>Écoute <strong>continue</strong> du lecteur NFC: badgez pour Entrée/Sortie.</li>
+                            <li>Liste des présents filtrable (nom, prénom, Société/Raison).</li>
+                            <li>Bouton <em>Forcer la sortie</em> (<i class="fas fa-sign-out-alt"></i>) sur chaque ligne pour marquer une personne comme sortie.</li>
+                            <li>Bouton <em>Vider</em> pour marquer tout le monde comme absent.</li>
+                            <li><strong>Badge inconnu</strong>: ouverture d'un modal pour lier le badge à un utilisateur existant ou en créer un nouveau.</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="mb-2">Autres pages utiles</h6>
+                        <ul class="mb-0 ps-3">
+                            <li><strong>Utilisateurs</strong>: création/modification, recherche, export Excel, Import Validé.</li>
+                            <li><strong>Visiteurs</strong>: gestion des badges visiteurs temporaires.</li>
+                            <li><strong>Historique</strong>: entrées/sorties détaillées, filtres, export.</li>
+                            <li><strong>Statistiques</strong>: courbes sur <em>24h glissantes</em> et heatmap 7×24.</li>
+                            <li><strong>Paramètres</strong>: rétention (historique/logs/inactifs), sons, purge immédiate.</li>
+                            <li><strong>Logs</strong>: consultation des journaux applicatifs.</li>
+                        </ul>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-info d-flex align-items-start gap-2">
+                    <i class="fas fa-user mt-1"></i>
+                    <div>
+                        <strong>Mode Utilisateur</strong><br>
+                        Badgez votre carte pour <em>entrer</em> ou <em>sortir</em>. La liste affiche les personnes présentes en temps réel.
+                    </div>
+                </div>
+                <ul class="ps-3 mb-0">
+                    <li>Écoute <strong>automatique</strong> du lecteur: approchez simplement votre badge.</li>
+                    <li>Si votre carte est <em>inconnue</em>, vous pourrez la lier à un utilisateur existant ou créer un nouveau profil.</li>
+                    <li>Utilisez la barre de recherche pour filtrer la liste (nom, prénom, Société/Raison).</li>
+                    <li>Des notifications visuelles et sons (si activés) confirment l’action.</li>
+                </ul>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let isListening = false;
+let listeningInterval = null;
+let currentSearch = '';
+
+// Met à jour le bandeau d'attente NFC (au-dessus de la section "Personnes présentes")
+function updateNFCBanner(mode, payload) {
+    const banner = document.getElementById('nfcWaitingBanner');
+    if (!banner) return;
+    // Reset classes
+    banner.classList.remove('alert-success','alert-warning','alert-danger','alert-primary','alert-secondary','alert-light');
+    banner.classList.add('alert');
+    const iconWrap = banner.querySelector('.status-icon');
+    const textWrap = banner.querySelector('.status-text');
+    if (!iconWrap || !textWrap) return;
+    iconWrap.innerHTML = '';
+    const strong = textWrap.querySelector('strong');
+    const sub = textWrap.querySelector('.small');
+    if (mode === 'waiting') {
+        banner.style.display = '';
+        banner.classList.add('alert-light','border');
+        iconWrap.innerHTML = '<div class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></div>';
+        if (strong) strong.textContent = "En attente d'une carte NFC";
+        if (sub) { sub.textContent = 'Approchez votre carte du lecteur pour badger'; sub.classList.remove('d-none'); }
+    } else if (mode === 'disconnected') {
+        banner.style.display = '';
+        banner.classList.add('alert-secondary','border');
+        iconWrap.innerHTML = '<i class="fas fa-plug text-secondary"></i>';
+        if (strong) strong.textContent = 'Lecteur NFC déconnecté';
+        if (sub) { sub.textContent = 'Branchez le lecteur pour activer la lecture'; sub.classList.remove('d-none'); }
+    } else if (mode === 'reading') {
+        banner.style.display = '';
+        banner.classList.add('alert-primary','border');
+        iconWrap.innerHTML = '<div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>';
+        if (strong) strong.textContent = 'Lecture du badge en cours...';
+        if (sub) { sub.textContent = 'Ne retirez pas la carte'; sub.classList.remove('d-none'); }
+    } else if (mode === 'unknown') {
+        banner.style.display = '';
+        banner.classList.add('alert-danger');
+        iconWrap.innerHTML = '<i class="fas fa-question-circle text-danger"></i>';
+        if (strong) strong.textContent = 'Badge inconnu';
+        if (sub) { sub.textContent = payload?.uid ? `UID: ${payload.uid}` : ''; sub.classList.remove('d-none'); }
+        setTimeout(()=> updateNFCBanner('waiting'), 3000);
+    } else if (mode === 'blacklist') {
+        banner.style.display = '';
+        banner.classList.add('alert-danger');
+        iconWrap.innerHTML = '<i class="fas fa-ban text-danger"></i>';
+        const u = payload?.utilisateur;
+        if (strong) strong.textContent = u ? `Utilisateur blacklisté: ${u.prenom} ${u.nom}` : 'Utilisateur blacklisté';
+        if (sub) { sub.textContent = u?.societe_raison || ''; sub.classList.remove('d-none'); }
+        setTimeout(()=> updateNFCBanner('waiting'), 3000);
+    } else if (mode === 'en_attente') {
+        banner.style.display = '';
+        banner.classList.add('alert-warning');
+        iconWrap.innerHTML = '<i class="fas fa-clock text-warning"></i>';
+        const u = payload?.utilisateur;
+        if (strong) strong.textContent = u ? `En attente de validation: ${u.prenom} ${u.nom}` : 'Utilisateur en attente';
+        if (sub) { sub.textContent = u?.societe_raison || ''; sub.classList.remove('d-none'); }
+        setTimeout(()=> updateNFCBanner('waiting'), 3000);
+    } else if (mode === 'entree') {
+        banner.style.display = '';
+        banner.classList.add('alert-success');
+        iconWrap.innerHTML = '<i class="fas fa-sign-in-alt text-success"></i>';
+        const u = payload?.utilisateur;
+        if (strong) strong.textContent = u ? `Entrée: ${u.prenom} ${u.nom}` : 'Entrée enregistrée';
+        if (sub) { sub.textContent = u?.societe_raison || ''; sub.classList.remove('d-none'); }
+        setTimeout(()=> updateNFCBanner('waiting'), 2000);
+    } else if (mode === 'sortie') {
+        banner.style.display = '';
+        banner.classList.add('alert-warning');
+        iconWrap.innerHTML = '<i class="fas fa-sign-out-alt text-warning"></i>';
+        const u = payload?.utilisateur;
+        if (strong) strong.textContent = u ? `Sortie: ${u.prenom} ${u.nom}` : 'Sortie enregistrée';
+        if (sub) { sub.textContent = u?.societe_raison || ''; sub.classList.remove('d-none'); }
+        setTimeout(()=> updateNFCBanner('waiting'), 2000);
+    } else {
+        // hide
+        banner.style.display = 'none';
+    }
+}
+
+function updateNFCFloating(mode, payload) {
+    const wrapper = document.querySelector('#nfcFloating .bg-dark');
+    const statusEl = document.getElementById('nfcStatus');
+    if (!wrapper || !statusEl) return;
+    wrapper.classList.remove('bg-success','bg-warning','bg-danger','bg-dark');
+    // par défaut
+    let text = "En attente de lecture";
+    let cls = 'bg-dark';
+    if (mode === 'waiting') {
+        cls = 'bg-dark';
+        text = 'En attente de lecture';
+    } else if (mode === 'unknown') {
+        cls = 'bg-danger';
+        text = 'Badge inconnu';
+    } else if (mode === 'blacklist') {
+        cls = 'bg-danger';
+        const u = payload?.utilisateur;
+        text = u ? `Blacklisté: ${u.prenom} ${u.nom}` : 'Utilisateur blacklisté';
+    } else if (mode === 'en_attente') {
+        cls = 'bg-warning';
+        const u = payload?.utilisateur;
+        text = u ? `En attente: ${u.prenom} ${u.nom}` : 'En attente de validation';
+    } else if (mode === 'entree') {
+        cls = 'bg-success';
+        const u = payload?.utilisateur;
+        text = u ? `Entrée: ${u.prenom} ${u.nom} (${u.societe_raison})` : 'Entrée enregistrée';
+    } else if (mode === 'sortie') {
+        cls = 'bg-warning';
+        const u = payload?.utilisateur;
+        text = u ? `Sortie: ${u.prenom} ${u.nom} (${u.societe_raison})` : 'Sortie enregistrée';
+    }
+    wrapper.classList.add(cls);
+    statusEl.textContent = text;
+}
+
+function isEventSoundEnabled(kind){
+    try{
+        const v = localStorage.getItem('sound_'+kind);
+        return v === null ? true : v === '1';
+    }catch(e){ return true; }
+}
+
+function playScanSound(kind) {
+    if (!isEventSoundEnabled(kind)) return;
+    try {
+        if (kind === 'entree') {
+            playNotificationSound([523, 659, 784], 120);
+        } else if (kind === 'sortie') {
+            playNotificationSound([659, 523, 415], 150);
+        } else if (kind === 'unknown') {
+            playNotificationSound([330, 0, 330, 0, 220], 110);
+        } else if (kind === 'blacklist') {
+            playNotificationSound([200, 180, 160, 140], 120);
+        }
+    } catch(e) { /* ignore */ }
+}
+
+// Fonction d'écoute continue des cartes NFC
+async function ecouteNFCContinue() {
+    if (isListening) return;
+    
+    isListening = true;
+    const status = document.getElementById('nfcStatus');
+    const error = document.getElementById('nfcError');
+    
+    console.log('🎧 Démarrage de l\'écoute NFC continue...');
+    
+    listeningInterval = setInterval(async () => {
+        try {
+            const response = await fetch('{% url "ecoute_nfc_continue" %}');
+            const data = await response.json();
+            
+            if (data.success) {
+                if (data.action === 'lier_badge_utilisateur') {
+                    // Badge inconnu - ouvrir le modal de liaison
+                    window._unknownBadgeUid = data.uid;
+                    openLinkBadgeModal(data.uid);
+                    updateNFCBanner('unknown', data);
+                    showAlert(`<strong>Badge inconnu</strong><br>UID: <code>${data.uid}</code><br>Veuillez le lier à un utilisateur`, 'warning');
+                    playScanSound('unknown');
+                    
+                } else if (data.action === 'entree') {
+                    // Entrée réussie
+                    const user = data.utilisateur;
+                    updateNFCFloating('entree', data);
+                    updateNFCBanner('entree', data);
+                    showAlert(`<strong>✅ ENTRÉE ENREGISTRÉE</strong><br>${user.prenom} ${user.nom}<br><small>${user.societe_raison}</small>`, 'success');
+                    playScanSound('entree');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
+                    
+                } else if (data.action === 'sortie') {
+                    // Sortie réussie
+                    const user = data.utilisateur;
+                    updateNFCFloating('sortie', data);
+                    updateNFCBanner('sortie', data);
+                    showAlert(`<strong>👋 SORTIE ENREGISTRÉE</strong><br>${user.prenom} ${user.nom}<br><small>${user.societe_raison}</small>`, 'warning');
+                    playScanSound('sortie');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
+                } else if (data.action === 'blacklist') {
+                    const user = data.utilisateur;
+                    updateNFCFloating('blacklist', data);
+                    updateNFCBanner('blacklist', data);
+                    showAlert(`<strong>⛔ UTILISATEUR BLACKLISTÉ</strong><br>${user.prenom} ${user.nom}<br><small>${user.societe_raison}</small>`, 'danger');
+                    playScanSound('blacklist');
+                } else if (data.action === 'en_attente') {
+                    const user = data.utilisateur || {};
+                    updateNFCFloating('en_attente', data);
+                    updateNFCBanner('en_attente', data);
+                    showAlert(`<strong>⏳ UTILISATEUR EN ATTENTE DE VALIDATION</strong><br>${user.prenom || ''} ${user.nom || ''}<br><small>${user.societe_raison || ''}</small>`, 'warning');
+                    playScanSound('blacklist');
+                } else if (data.action === 'visiteur_affectation') {
+                    // Badge visiteur non affecté: ouvrir le modal d'affectation
+                    window._visitorUid = data.uid;
+                    openAssignVisitorModal(data.uid);
+                    updateNFCBanner('unknown', {uid: data.uid});
+                    showAlert(`<strong>Badge visiteur détecté</strong><br>UID: <code>${data.uid}</code><br>Veuillez l'affecter à un utilisateur ou en créer un`, 'warning');
+                }
+                
+                // Cacher les erreurs si tout va bien
+                if (error) error.style.display = 'none';
+                if (status) status.style.display = 'flex';
+                updateNFCFloating('waiting');
+                updateNFCBanner('waiting');
+                
+            } else if (data.no_card) {
+                // Pas de carte détectée - afficher l'état du lecteur ou la lecture en cours
+                if (error) error.style.display = 'none';
+                if (status) status.style.display = 'flex';
+                // Mettre à jour le bandeau d'attente ou déconnecté selon l'état lecteur
+                if (typeof data.reader_connected !== 'undefined' && data.reader_connected === false) {
+                    // Lecteur déconnecté
+                    updateNFCBanner('disconnected');
+                    updateNFCFloating('waiting');
+                } else if (data.card_present) {
+                    // Carte présente en cours de lecture
+                    updateNFCBanner('reading');
+                    updateNFCFloating('waiting');
+                } else {
+                    // En attente d'une carte
+                    updateNFCBanner('waiting');
+                    updateNFCFloating('waiting');
+                }
+                
+            } else if (data.error) {
+                // Erreur réelle du système NFC
+                console.warn('Erreur NFC:', data.message);
+                const em = document.getElementById('errorMessage');
+                if (em) em.textContent = data.message;
+                if (error) error.style.display = 'block';
+                if (status) status.style.display = 'none';
+                updateNFCBanner('hide');
+                
+                // Afficher une notification d'erreur moins fréquente
+                if (!window.lastErrorTime || (Date.now() - window.lastErrorTime) > 15000) {
+                    showAlert(`<strong>⚠️ Erreur NFC</strong><br>${data.message}`, 'danger');
+                    window.lastErrorTime = Date.now();
+                }
+            }
+            
+        } catch (err) {
+            console.error('Erreur de communication:', err);
+            const em = document.getElementById('errorMessage');
+            if (em) em.textContent = 'Erreur de communication avec le serveur';
+            if (error) error.style.display = 'block';
+            if (status) status.style.display = 'none';
+            updateNFCBanner('hide');
+            
+            // Notification d'erreur de communication moins fréquente
+            if (!window.lastCommErrorTime || (Date.now() - window.lastCommErrorTime) > 15000) {
+                showAlert('<strong>🔌 Erreur de connexion</strong><br>Problème de communication avec le serveur', 'danger');
+                window.lastCommErrorTime = Date.now();
+            }
+        }
+    }, 1000); // Vérifier toutes les secondes
+}
+
+// Arrêter l'écoute
+function arreterEcouteNFC() {
+    if (listeningInterval) {
+        clearInterval(listeningInterval);
+        listeningInterval = null;
+    }
+    isListening = false;
+    console.log('🔇 Écoute NFC arrêtée');
+}
+
+// Démarrer l'écoute au chargement de la page
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        ecouteNFCContinue();
+    }, 1000); // Petite pause pour laisser la page se charger
+    // Au chargement, afficher le bandeau en état attente
+    updateNFCBanner('waiting');
+});
+
+// Arrêter l'écoute quand on quitte la page
+window.addEventListener('beforeunload', function() {
+    arreterEcouteNFC();
+});
+
+// Gestionnaire du formulaire nouvel utilisateur
+document.getElementById('newUserForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const data = {};
+    
+    for (let [key, value] of formData.entries()) {
+        data[key] = value;
+    }
+    
+    try {
+        const response = await makeAjaxRequest('{% url "enregistrer_utilisateur" %}', 'POST', data);
+        const result = await response.json();
+        
+        if (result.success) {
+            // Si ce formulaire a été déclenché par l'affectation d'un badge visiteur,
+            // chaîner l'affectation avec l'identifiant renvoyé
+            if (typeof this._visitorHandler === 'function' && result.user_id){
+                await this._visitorHandler(result.user_id);
+            }
+            const formData = new FormData(document.getElementById('newUserForm'));
+            const nom = formData.get('nom');
+            const prenom = formData.get('prenom');
+            const societe_raison = formData.get('societe_raison');
+            
+            showAlert(`<strong>🎉 UTILISATEUR CRÉÉ</strong><br>${prenom} ${nom}<br><small>${societe_raison}</small><br><em>Placez à nouveau la carte pour pointer l'entrée</em>`, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('newUserModal')).hide();
+            this.reset();
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
+        } else {
+            showAlert(`<strong>❌ Erreur d'enregistrement</strong><br>${result.message}`, 'danger');
+        }
+    } catch (error) {
+        showAlert('❌ Erreur lors de l\'enregistrement', 'danger');
+        console.error('Erreur:', error);
+    }
+});
+
+// Fonction pour vider la liste des présences
+async function viderListePresences() {
+    const ok = await showConfirm({
+        title: 'Vider la liste des présences',
+        message: 'Cette action marquera toutes les personnes comme absentes. Continuer ?',
+        confirmText: 'Vider',
+        confirmVariant: 'warning'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest('{% url "vider_liste_presences" %}', 'POST');
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de l\'opération', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Fonction pour forcer la sortie d'une personne
+async function forcerSortie(userId, prenom, nom) {
+    const ok = await showConfirm({
+        title: 'Forcer la sortie',
+        message: `Voulez-vous forcer la sortie de <strong>${prenom} ${nom}</strong> ?`,
+        confirmText: 'Forcer la sortie',
+        confirmVariant: 'danger'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest('{% url "forcer_sortie_utilisateur" %}', 'POST', {user_id: userId});
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(`<strong>👋 SORTIE FORCÉE</strong><br>${data.message}`, 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de l\'opération', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Mise à jour en temps réel des compteurs sans recharger la page
+function mettreAJourCompteurs() {
+    fetch(window.location.href)
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            
+            // Mettre à jour le compteur
+            const nouveauCompteur = doc.getElementById('presentCounter');
+            if (nouveauCompteur) {
+                document.getElementById('presentCounter').textContent = nouveauCompteur.textContent;
+            }
+            
+            // Mettre à jour le tableau si pas de modal ouvert
+            if (!document.querySelector('.modal.show')) {
+                const nouveauTableau = doc.querySelector('#presenceTable tbody');
+                const tableauActuel = document.querySelector('#presenceTable tbody');
+                if (nouveauTableau && tableauActuel) {
+                    tableauActuel.innerHTML = nouveauTableau.innerHTML;
+                    // réappliquer le filtre courant
+                    appliquerFiltrePresence(currentSearch);
+                }
+            }
+        })
+        .catch(err => console.log('Erreur mise à jour:', err));
+}
+
+// Mise à jour toutes les 10 secondes
+setInterval(mettreAJourCompteurs, 10000);
+
+// Filtrage live du tableau des présences (exclure la colonne heure)
+function normaliserTexte(t) {
+    return (t || '').toString().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+function appliquerFiltrePresence(requete) {
+    currentSearch = requete;
+    const raw = normaliserTexte(requete);
+    const tbody = document.querySelector('#presenceTable tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    // Parsing multi-champ: tokens séparés par espace, forme cle:valeur
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    const keyFilters = {}; // { nom:[], prenom:[], Société/Raison:[] }
+    const general = [];
+
+    tokens.forEach(tok => {
+        const idx = tok.indexOf(':');
+        if (idx > 0) {
+            let k = tok.slice(0, idx).trim();
+            let v = tok.slice(idx + 1).trim();
+            // normaliser clés possibles
+            k = normaliserTexte(k).replace('pr\u00e9nom', 'prenom');
+            if (['nom','prenom','societe_raison'].includes(k) && v) {
+                (keyFilters[k] ||= []).push(v);
+            } else if (v) {
+                general.push(tok);
+            }
+        } else {
+            general.push(tok);
+        }
+    });
+
+    rows.forEach(tr => {
+        const cells = tr.querySelectorAll('td');
+        const nom = normaliserTexte(cells[0]?.textContent);
+        const prenom = normaliserTexte(cells[1]?.textContent);
+        const societe_raison = normaliserTexte(cells[2]?.textContent);
+
+        // Vérifier filtres par clé (ET entre clés, ET entre valeurs d'une même clé)
+        let ok = true;
+        for (const key of Object.keys(keyFilters)) {
+            const vals = keyFilters[key];
+            const hay = key === 'nom' ? nom : key === 'prenom' ? prenom : societe_raison;
+            if (!vals.every(v => hay.includes(v))) { ok = false; break; }
+        }
+
+        // Filtres généraux: tous les tokens doivent apparaître dans l'union des champs
+        if (ok && general.length) {
+            const hayAll = `${nom} ${prenom} ${societe_raison}`;
+            ok = general.every(v => hayAll.includes(v));
+        }
+
+        tr.style.display = ok ? '' : 'none';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('presenceSearch');
+    const clearBtn = document.getElementById('clearSearch');
+    if (input) {
+        input.addEventListener('input', (e) => appliquerFiltrePresence(e.target.value));
+    }
+    if (clearBtn && input) {
+        clearBtn.addEventListener('click', () => { input.value = ''; appliquerFiltrePresence(''); input.focus(); });
+    }
+});
+</script>
+<script>
+// Modal d'affectation de badge visiteur
+function openAssignVisitorModal(uid){
+        let modalEl = document.getElementById('assignVisitorModal');
+        if (!modalEl){
+                modalEl = document.createElement('div');
+                modalEl.id = 'assignVisitorModal';
+                modalEl.className = 'modal fade';
+                modalEl.tabIndex = -1;
+                modalEl.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header bg-warning">
+                            <h5 class="modal-title"><i class="fas fa-id-badge me-2"></i>Affecter un badge visiteur</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-2">UID: <code id="assignUid"></code></div>
+                            <div class="mb-2 small text-muted">Choisissez un utilisateur existant ou créez-en un nouveau.</div>
+                            <div class="input-group input-group-sm mb-2">
+                                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                <input type="text" class="form-control" id="assignSearch" placeholder="Rechercher (nom, prénom, Société/Raison)">
+                            </div>
+                            <div style="max-height:220px; overflow:auto; border:1px solid var(--bs-border-color); border-radius:.5rem;" id="assignListWrap">
+                                <ul class="list-group list-group-flush" id="assignList"></ul>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button type="button" class="btn btn-success" id="btnCreateUserFromVisitor"><i class="fas fa-user-plus me-1"></i>Créer nouvel utilisateur</button>
+                        </div>
+                    </div>
+                </div>`;
+                document.body.appendChild(modalEl);
+        }
+        // populate
+        modalEl.querySelector('#assignUid').textContent = uid;
+        const listEl = modalEl.querySelector('#assignList');
+        const searchEl = modalEl.querySelector('#assignSearch');
+    const render = (items)=>{
+                listEl.innerHTML='';
+                if (!items || !items.length){
+                        listEl.innerHTML = '<li class="list-group-item text-muted">Aucun résultat</li>';
+                        return;
+                }
+                items.forEach(it=>{
+                        const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+            const left = document.createElement('span');
+            left.textContent = it.label;
+            if (it.blackliste){
+                const bl = document.createElement('span');
+                bl.className = 'badge bg-danger ms-2';
+                bl.textContent = 'BLACKLISTÉ';
+                left.appendChild(bl);
+            }
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-primary';
+            btn.innerHTML = '<i class="fas fa-check"></i> Affecter';
+            if (it.blackliste){
+                btn.disabled = true;
+                btn.classList.add('disabled');
+                btn.title = "Utilisateur blacklisté: affectation interdite";
+            } else {
+                btn.addEventListener('click', async ()=>{
+                try{
+                    const r = await makeAjaxRequest('{% url "visiteur_affecter_badge" %}', 'POST', {uid: uid, user_id: it.id});
+                    const j = await r.json();
+                    if (j.success){
+                    showAlert('Badge affecté et entrée enregistrée', 'success');
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                    setTimeout(()=> location.reload(), 1200);
+                    } else {
+                    const msg = j.message || 'Affectation refusée';
+                    showAlert(msg, 'danger');
+                    }
+                }catch(e){ showAlert('Erreur lors de l\'affectation', 'danger'); }
+                });
+            }
+            li.append(left);
+            li.append(btn);
+                        
+                        listEl.appendChild(li);
+                });
+        };
+        const load = async (q)=>{
+                try{
+                        const url = new URL('{% url "utilisateurs_liste" %}', window.location.origin);
+                        if (q) url.searchParams.set('q', q);
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        if (data.success){ render(data.results); }
+                }catch(e){ /* ignore */ }
+        };
+        searchEl.oninput = (e)=> load(e.target.value);
+        load('');
+    // Lien création
+        modalEl.querySelector('#btnCreateUserFromVisitor').onclick = ()=>{
+                bootstrap.Modal.getInstance(modalEl).hide();
+        // Ouvrir le modal existant de création utilisateur
+        // IMPORTANT: pour un badge visiteur, ne pas associer l'UID du badge au nouvel utilisateur
+        // afin d'éviter qu'il soit reconnu comme carte personnelle par la suite.
+        document.getElementById('cardUid').value = '';
+                const m = new bootstrap.Modal(document.getElementById('newUserModal'), {backdrop:'static', keyboard:false});
+                m.show();
+                // A la sauvegarde, on affecte automatiquement le badge
+                const form = document.getElementById('newUserForm');
+                const originalHandler = form._visitorHandler;
+                form._visitorHandler = async function(createdId){
+                        try{
+                                const r = await makeAjaxRequest('{% url "visiteur_affecter_badge" %}', 'POST', {uid: uid, user_id: createdId});
+                                const j = await r.json();
+                                if (j.success){ showAlert('Badge affecté et entrée enregistrée', 'success'); setTimeout(()=> location.reload(), 1500); }
+                                else { showAlert(j.message, 'danger'); }
+                        }catch(e){ showAlert('Erreur lors de l\'affectation', 'danger'); }
+                        // nettoyer le hook
+                        form._visitorHandler = null;
+                };
+        };
+        const modal = new bootstrap.Modal(modalEl, {backdrop:'static'});
+        modal.show();
+}
+</script>
+<script>
+// Modal de liaison de badge inconnu à un utilisateur existant
+function openLinkBadgeModal(uid){
+        let modalEl = document.getElementById('linkBadgeModal');
+        if (!modalEl){
+                modalEl = document.createElement('div');
+                modalEl.id = 'linkBadgeModal';
+                modalEl.className = 'modal fade';
+                modalEl.tabIndex = -1;
+                modalEl.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header bg-primary text-white">
+                            <h5 class="modal-title"><i class="fas fa-link me-2"></i>Lier un badge à un utilisateur</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-2">UID du badge: <code id="linkBadgeUid"></code></div>
+                            <div class="mb-2 small text-muted">Choisissez un utilisateur existant pour lier ce badge de façon permanente, ou créez un nouvel utilisateur.</div>
+                            <div class="input-group input-group-sm mb-2">
+                                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                <input type="text" class="form-control" id="linkBadgeSearch" placeholder="Rechercher (nom, prénom, Société/Raison)">
+                            </div>
+                            <div style="max-height:220px; overflow:auto; border:1px solid var(--bs-border-color); border-radius:.5rem;" id="linkBadgeListWrap">
+                                <ul class="list-group list-group-flush" id="linkBadgeList"></ul>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button type="button" class="btn btn-success" id="btnCreateUserFromBadge"><i class="fas fa-user-plus me-1"></i>Créer nouvel utilisateur</button>
+                        </div>
+                    </div>
+                </div>`;
+                document.body.appendChild(modalEl);
+        }
+        // populate
+        modalEl.querySelector('#linkBadgeUid').textContent = uid;
+        const listEl = modalEl.querySelector('#linkBadgeList');
+        const searchEl = modalEl.querySelector('#linkBadgeSearch');
+    const render = (items)=>{
+                listEl.innerHTML='';
+                if (!items || !items.length){
+                        listEl.innerHTML = '<li class="list-group-item text-muted">Aucun résultat</li>';
+                        return;
+                }
+                items.forEach(it=>{
+                        const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center gap-2';
+            const left = document.createElement('span');
+            left.textContent = it.label;
+            if (it.blackliste){
+                const bl = document.createElement('span');
+                bl.className = 'badge bg-danger ms-2';
+                bl.textContent = 'BLACKLISTÉ';
+                left.appendChild(bl);
+            }
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-primary';
+            btn.innerHTML = '<i class="fas fa-link"></i> Lier';
+            if (it.blackliste){
+                btn.disabled = true;
+                btn.classList.add('disabled');
+                btn.title = "Utilisateur blacklisté: liaison interdite";
+            } else {
+                btn.addEventListener('click', async ()=>{
+                try{
+                    const r = await makeAjaxRequest('{% url "lier_badge_utilisateur_permanent" %}', 'POST', {uid: uid, user_id: it.id});
+                    const j = await r.json();
+                    if (j.success){
+                    showAlert('Badge lié et entrée enregistrée', 'success');
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                    setTimeout(()=> location.reload(), 1200);
+                    } else {
+                    const msg = j.message || 'Liaison refusée';
+                    showAlert(msg, 'danger');
+                    }
+                }catch(e){ showAlert('Erreur lors de la liaison', 'danger'); }
+                });
+            }
+            li.append(left);
+            li.append(btn);
+                        
+                        listEl.appendChild(li);
+                });
+        };
+        const load = async (q)=>{
+                try{
+                        const url = new URL('{% url "utilisateurs_liste" %}', window.location.origin);
+                        if (q) url.searchParams.set('q', q);
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        if (data.success){ render(data.results); }
+                }catch(e){ /* ignore */ }
+        };
+        searchEl.oninput = (e)=> load(e.target.value);
+        load('');
+    // Lien création
+        modalEl.querySelector('#btnCreateUserFromBadge').onclick = ()=>{
+                bootstrap.Modal.getInstance(modalEl).hide();
+        // Ouvrir le modal existant de création utilisateur
+        // Pour un badge inconnu, on associe l'UID au nouvel utilisateur
+        document.getElementById('cardUid').value = uid;
+                const m = new bootstrap.Modal(document.getElementById('newUserModal'), {backdrop:'static', keyboard:false});
+                m.show();
+        };
+        const modal = new bootstrap.Modal(modalEl, {backdrop:'static'});
+        modal.show();
+}
+</script>
+<script>
+// Hook sur la création utilisateur pour capturer l'id et enchaîner l'affectation (si demandé)
+(function(){
+    const form = document.getElementById('newUserForm');
+    if (!form) return;
+    const oldSubmit = form.onsubmit;
+    form.addEventListener('submit', async function(e){
+        // Le code d'origine gère l'envoi; nous interceptons seulement la réponse pour récupérer user_id
+        // Le code d'origine est maintenu ci-dessus (nous n'écrasons pas). Rien à faire ici.
+    });
+})();
+</script>
+{% endblock %}
+

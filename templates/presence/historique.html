@@ -1,0 +1,204 @@
+{% extends 'presence/base.html' %}
+
+{% block title %}Historique - Gestion de Présence{% endblock %}
+{% block page_title %}Historique des Entrées et Sorties{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <!-- En-tête + Recherche (sur la même ligne que les boutons) -->
+        <div class="card mb-4">
+            <div class="card-body py-3">
+                <div class="row align-items-center g-2">
+                    <div class="col-lg-6 col-md-5">
+                        <div class="d-flex align-items-baseline gap-2">
+                            <h5 class="mb-0 fw-semibold d-flex align-items-center">
+                                <i class="fas fa-history text-primary me-2"></i>
+                                Historique
+                            </h5>
+                            <small class="text-muted">{{ historique.count }} action{{ historique.count|pluralize }}</small>
+                        </div>
+                    </div>
+                    <div class="col-lg-6 col-md-7">
+                        <div class="d-flex justify-content-end align-items-center flex-wrap flex-lg-nowrap gap-2">
+                            <div class="input-group input-group-sm" style="max-width: 320px;">
+                                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                <input type="text" class="form-control" id="historiqueSearch" placeholder="Filtrer nom, prénom, Société/Raison, action...">
+                                <button class="btn btn-outline-secondary" type="button" id="clearHistoriqueSearch" title="Effacer"><i class="fas fa-times"></i></button>
+                            </div>
+                            <a href="{% url 'export_historique_excel' %}" class="btn btn-success btn-sm">
+                                <i class="fas fa-file-excel"></i> Export Excel
+                            </a>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="viderHistorique()">
+                                <i class="fas fa-trash-alt"></i> Vider l'historique
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tableau de l'historique -->
+        <div class="card mb-4">
+            <div class="card-body">
+                {% if historique %}
+                <div class="table-responsive">
+                    <table class="table table-hover" id="historiqueTable">
+                        <thead class="table-primary">
+                            <tr>
+                                <th>Date et heure</th>
+                                <th>Nom</th>
+                                <th>Prénom</th>
+                                <th>Société/Raison</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for entry in historique %}
+                            <tr>
+                                <td>
+                                    <strong>{{ entry.horodatage|date:"d/m/Y" }}</strong><br>
+                                    <small class="text-muted">{{ entry.horodatage|date:"H:i:s" }}</small>
+                                </td>
+                                <td><strong>{{ entry.utilisateur.nom }}</strong></td>
+                                <td>{{ entry.utilisateur.prenom }}</td>
+                                <td>{{ entry.utilisateur.societe_raison }}</td>
+                                <td>
+                                    {% if entry.type_action == 'ENTREE' %}
+                                        <span class="badge bg-success">
+                                            <i class="fas fa-sign-in-alt"></i> Entrée
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-warning">
+                                            <i class="fas fa-sign-out-alt"></i> Sortie
+                                        </span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-history fa-4x text-muted mb-3"></i>
+                    <h4 class="text-muted">Aucun historique trouvé</h4>
+                    {% if search_query %}
+                    <p class="text-muted">Aucun résultat pour votre recherche. <a href="{% url 'historique' %}">Voir tout l'historique</a></p>
+                    {% else %}
+                    <p class="text-muted">L'historique des présences apparaîtra ici au fur et à mesure des utilisations du lecteur NFC.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Statistiques déplacées vers la page dédiée /statistiques #}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Fonction pour vider l'historique
+async function viderHistorique() {
+    const ok = await showConfirm({
+        title: "Vider l'historique",
+        message: "Êtes-vous sûr de vouloir supprimer <strong>TOUT l'historique</strong> ?<br><small class=\"text-muted\">Cette action est irréversible.</small>",
+        confirmText: "Vider l'historique",
+        confirmVariant: 'danger'
+    });
+    if (!ok) return;
+
+    try {
+        const response = await makeAjaxRequest('{% url "vider_historique" %}', 'POST');
+        const data = await response.json();
+
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => { location.reload(); }, 1200);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de la suppression', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Fonction pour filtrer par type d'action
+function filtrerParAction(type) {
+    const rows = document.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        const badge = row.querySelector('.badge');
+        if (type === 'all') {
+            row.style.display = '';
+        } else if (type === 'entree' && badge.textContent.includes('Entrée')) {
+            row.style.display = '';
+        } else if (type === 'sortie' && badge.textContent.includes('Sortie')) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+// Ajouter des boutons de filtre dynamiquement
+document.addEventListener('DOMContentLoaded', function() {
+    const cardBody = document.querySelector('.table-responsive')?.parentNode;
+    
+    const filterDiv = document.createElement('div');
+    filterDiv.className = 'mb-3';
+    filterDiv.innerHTML = `
+        <div class="btn-group" role="group" aria-label="Filtres">
+            <input type="radio" class="btn-check" name="filter" id="filter-all" autocomplete="off" checked onchange="filtrerParAction('all')">
+            <label class="btn btn-outline-primary btn-sm" for="filter-all">Tout</label>
+            
+            <input type="radio" class="btn-check" name="filter" id="filter-entree" autocomplete="off" onchange="filtrerParAction('entree')">
+            <label class="btn btn-outline-success btn-sm" for="filter-entree">Entrées</label>
+            
+            <input type="radio" class="btn-check" name="filter" id="filter-sortie" autocomplete="off" onchange="filtrerParAction('sortie')">
+            <label class="btn btn-outline-warning btn-sm" for="filter-sortie">Sorties</label>
+        </div>
+    `;
+    
+    const tableDiv = document.querySelector('.table-responsive');
+    if (tableDiv) {
+        cardBody.insertBefore(filterDiv, tableDiv);
+    }
+    // Graphiques (si présents)
+    // Plus de graphiques ici
+
+    // Filtrage live du tableau historique (exclut la colonne date/heure)
+    function normaliserTexte(t) {
+        return (t || '').toString().toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .trim();
+    }
+    function appliquerFiltreHistorique(q) {
+        const tbody = document.querySelector('#historiqueTable tbody');
+        if (!tbody) return;
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const tokens = normaliserTexte(q).split(/\s+/).filter(Boolean);
+        rows.forEach(tr => {
+            const cells = tr.querySelectorAll('td');
+            // Champs index 1..4: nom, prénom, Société/Raison, action (ignorer 0: date/heure)
+            const hay = normaliserTexte([
+                cells[1]?.textContent,
+                cells[2]?.textContent,
+                cells[3]?.textContent,
+                cells[4]?.textContent
+            ].join(' '));
+            const ok = tokens.every(t => hay.includes(t));
+            tr.style.display = tokens.length === 0 || ok ? '' : 'none';
+        });
+    }
+    const hInput = document.getElementById('historiqueSearch');
+    const hClear = document.getElementById('clearHistoriqueSearch');
+    if (hInput) hInput.addEventListener('input', (e)=> appliquerFiltreHistorique(e.target.value));
+    if (hClear && hInput) hClear.addEventListener('click', ()=> { hInput.value=''; appliquerFiltreHistorique(''); hInput.focus(); });
+});
+</script>
+{% endblock %}

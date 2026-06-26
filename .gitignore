@@ -1,0 +1,48 @@
+# Environnements virtuels Python
+.venv/
+.agentvenv/
+env/
+venv/
+ENV/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Base de données locale
+db.sqlite3
+
+# Logs applicatifs
+logs/
+*.log
+
+# Fichiers de build/distribution
+dist/
+build/
+*.egg
+*.egg-info/
+
+# Fichiers IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Variables d'environnement
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# Couverture de tests
+.coverage
+htmlcov/

@@ -1,0 +1,126 @@
+{% extends 'presence/base.html' %}
+
+{% block title %}Logs applicatifs{% endblock %}
+{% block page_title %}Logs applicatifs{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <div class="card mb-3">
+      <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label">Niveau</label>
+            <select name="level" class="form-select">
+              <option value="" {% if not level %}selected{% endif %}>Tous</option>
+              <option value="INFO" {% if level == 'INFO' %}selected{% endif %}>INFO</option>
+              <option value="WARNING" {% if level == 'WARNING' %}selected{% endif %}>WARNING</option>
+              <option value="ERROR" {% if level == 'ERROR' %}selected{% endif %}>ERROR</option>
+            </select>
+          </div>
+          <div class="col-md-7">
+            <label class="form-label">Recherche</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="fas fa-search"></i></span>
+              <input type="text" name="q" class="form-control" value="{{ q }}" placeholder="UID, nom, message..." />
+            </div>
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100"><i class="fas fa-filter"></i> Filtrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="fas fa-file-alt me-2"></i>Derniers logs</h6>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-secondary btn-sm" id="autoRefreshBtn"><i class="fas fa-sync-alt"></i> Auto-refresh</button>
+          <form method="post" action="{% url 'logs_clear' %}" id="clearLogsForm">
+            {% csrf_token %}
+            <button type="button" id="clearLogsBtn" class="btn btn-outline-danger btn-sm"><i class="fas fa-trash-alt"></i> Supprimer les logs</button>
+          </form>
+        </div>
+      </div>
+      <div class="card-body p-0" style="max-height: 60vh; overflow:auto;">
+        <table class="table table-hover mb-0" id="logsTable">
+          <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
+            <tr>
+              <th style="width: 210px;">Horodatage</th>
+              <th style="width: 110px;">Niveau</th>
+              <th>Message</th>
+              <th style="width: 220px;">Logger</th>
+            </tr>
+          </thead>
+          <tbody id="logTBody">
+            {% for e in log_entries %}
+            {% with lvl=e.level %}
+            <tr class="align-middle">
+              <td class="text-nowrap"><small class="text-muted">{{ e.timestamp }}</small></td>
+              <td>
+                {% if lvl == 'ERROR' %}
+                  <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>ERROR</span>
+                {% elif lvl == 'WARNING' %}
+                  <span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle me-1"></i>WARNING</span>
+                {% elif lvl == 'INFO' %}
+                  <span class="badge bg-success"><i class="fas fa-info-circle me-1"></i>INFO</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ lvl }}</span>
+                {% endif %}
+              </td>
+              <td><code class="text-dark">{{ e.message }}</code></td>
+              <td class="text-muted text-truncate">{{ e.logger }}</td>
+            </tr>
+            {% endwith %}
+            {% empty %}
+            <tr><td colspan="4" class="text-center py-4 text-muted">Aucun log à afficher</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let autoRefresh = false;
+const btn = document.getElementById('autoRefreshBtn');
+btn.addEventListener('click', async function() {
+  autoRefresh = !autoRefresh;
+  btn.classList.toggle('btn-success', autoRefresh);
+  btn.classList.toggle('btn-outline-secondary', !autoRefresh);
+  btn.innerHTML = autoRefresh ? '<i class="fas fa-sync-alt fa-spin"></i> Auto-refresh ON' : '<i class="fas fa-sync-alt"></i> Auto-refresh';
+});
+
+async function refreshLogs() {
+  if (!autoRefresh) return;
+  try {
+    const url = new URL(window.location.href);
+    const res = await fetch(url);
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const tbody = doc.getElementById('logTBody');
+    const localTbody = document.getElementById('logTBody');
+    if (tbody && localTbody) {
+      localTbody.innerHTML = tbody.innerHTML;
+      localTbody.parentElement.parentElement.scrollTop = 0; // rester en haut
+    }
+  } catch (e) { /* ignore */ }
+}
+setInterval(refreshLogs, 5000);
+
+// Confirmation intégrée pour la suppression des logs
+document.getElementById('clearLogsBtn')?.addEventListener('click', async function(){
+  const ok = await showConfirm({
+    title: 'Supprimer les logs',
+    message: "Cette action est irréversible. Voulez-vous supprimer définitivement le contenu des logs ?",
+    confirmText: 'Supprimer',
+    confirmVariant: 'danger'
+  });
+  if (ok) document.getElementById('clearLogsForm').submit();
+});
+</script>
+{% endblock %}

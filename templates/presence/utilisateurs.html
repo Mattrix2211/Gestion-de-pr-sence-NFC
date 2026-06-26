@@ -1,0 +1,859 @@
+{% extends 'presence/base.html' %}
+
+{% block title %}Utilisateurs - Gestion de Présence{% endblock %}
+{% block page_title %}Liste des Utilisateurs{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <!-- Boutons d'action en haut de page -->
+        {% if is_admin %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#infoUtilisateursModal" title="Aide">
+                <i class="fas fa-info-circle"></i>
+            </button>
+            <div class="d-flex gap-2">
+                <a href="{% url 'export_utilisateurs_excel' %}" class="btn btn-success btn-sm">
+                    <i class="fas fa-file-excel"></i> Export Validés
+                </a>
+                <a href="{% url 'export_utilisateurs_attente_excel' %}" class="btn btn-outline-warning btn-sm">
+                    <i class="fas fa-file-excel"></i> Export En attente
+                </a>
+                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal">
+                    <i class="fas fa-file-import"></i> Import Validé
+                </button>
+                <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelAttenteModal">
+                    <i class="fas fa-file-import"></i> Import en attente
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="supprimerTousUtilisateurs()">
+                    <i class="fas fa-trash-alt"></i> Supprimer tout
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tableau des utilisateurs en attente de validation -->
+        {% if utilisateurs_attente.count > 0 %}
+        <div class="card mb-4">
+            <div class="card-header bg-warning text-dark">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clock me-2"></i>
+                        En attente de validation
+                        <span class="badge bg-dark ms-2">{{ utilisateurs_attente.count }}</span>
+                    </h5>
+                    <div class="input-group input-group-sm" style="max-width: 320px;">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="attenteSearch" placeholder="Filtrer nom, prénom, société...">
+                        <button class="btn btn-outline-secondary" type="button" id="clearAttenteSearch" title="Effacer"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="attenteTable">
+                        <thead class="table-warning">
+                            <tr>
+                                <th>Nom</th>
+                                <th>Prénom</th>
+                                <th>Date de naissance</th>
+                                <th>Lieu de naissance</th>
+                                <th>Département/Pays</th>
+                                <th>Nationalité</th>
+                                <th>Société/Raison</th>
+                                {% if is_admin %}
+                                <th>Actions</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for utilisateur in utilisateurs_attente %}
+                            <tr>
+                                <td><strong>{{ utilisateur.nom }}</strong></td>
+                                <td>{{ utilisateur.prenom }}</td>
+                                <td>{{ utilisateur.date_naissance|date:"d/m/Y" }}</td>
+                                <td>{{ utilisateur.lieu_naissance }}</td>
+                                <td>{{ utilisateur.departement_pays }}</td>
+                                <td>{{ utilisateur.nationalite }}</td>
+                                <td>{{ utilisateur.societe_raison }}</td>
+                                {% if is_admin %}
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <button type="button" class="btn btn-success btn-sm btn-valider-user" 
+                        data-user-id="{{ utilisateur.id }}" data-user-name="{{ utilisateur.prenom }} {{ utilisateur.nom }}" title="Valider">
+                                            <i class="fas fa-check"></i> Valider
+                                        </button>
+                                        <button type="button" class="btn btn-danger btn-sm btn-refuser-user" 
+                        data-user-id="{{ utilisateur.id }}" data-user-name="{{ utilisateur.prenom }} {{ utilisateur.nom }}" title="Refuser">
+                                            <i class="fas fa-ban"></i> Refuser
+                                        </button>
+                                    </div>
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tableau des utilisateurs validés -->
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="mb-0">
+                        <i class="fas fa-users me-2"></i>
+                        Utilisateurs validés
+                        <span class="badge bg-light text-dark ms-2">{{ utilisateurs.count }}</span>
+                    </h5>
+                    <div class="input-group input-group-sm" style="max-width: 320px;">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="valideSearch" placeholder="Filtrer nom, prénom, société...">
+                        <button class="btn btn-outline-secondary" type="button" id="clearValideSearch" title="Effacer"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if utilisateurs %}
+                <div class="table-responsive">
+                    <table class="table table-hover" id="usersTable">
+                        <thead class="table-primary">
+                            <tr>
+                                <th>Nom</th>
+                                <th>Prénom</th>
+                                <th>Date de naissance</th>
+                                <th>Lieu de naissance</th>
+                                <th>Département/Pays</th>
+                                <th>Nationalité</th>
+                                <th>Société/Raison</th>
+                                <th>Statut</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for utilisateur in utilisateurs %}
+                            <tr>
+                                <td><strong>{{ utilisateur.nom }}</strong></td>
+                                <td>{{ utilisateur.prenom }}</td>
+                                <td>{{ utilisateur.date_naissance|date:"d/m/Y" }}</td>
+                                <td>{{ utilisateur.lieu_naissance }}</td>
+                                <td>{{ utilisateur.departement_pays }}</td>
+                                <td>{{ utilisateur.nationalite }}</td>
+                                <td>{{ utilisateur.societe_raison }}</td>
+                                <td>
+                                    <div class="d-flex flex-column gap-1">
+                                        <div>
+                                            {% if utilisateur.present %}
+                                                <span class="badge bg-success"><i class="fas fa-check"></i> Présent</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary"><i class="fas fa-times"></i> Absent</span>
+                                            {% endif %}
+                                        </div>
+                                        {% if utilisateur.blackliste %}
+                                            <div><span class="badge bg-danger"><i class="fas fa-ban"></i> Blacklisté</span></div>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        {% if is_admin %}
+                                        <button type="button" class="btn btn-outline-primary btn-sm btn-edit-user" 
+                        data-user-id="{{ utilisateur.id }}" title="Modifier">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm btn-detach-card"
+                        data-user-id="{{ utilisateur.id }}" data-user-name="{{ utilisateur.prenom }} {{ utilisateur.nom }}" title="Détacher la carte">
+                                            <i class="fas fa-id-card"></i>
+                                        </button>
+                                        {% endif %}
+                                        <button type="button" class="btn btn-outline-success btn-sm btn-link-card"
+                        data-user-id="{{ utilisateur.id }}" data-user-name="{{ utilisateur.prenom }} {{ utilisateur.nom }}" title="Lier un badge">
+                                            <i class="fas fa-link"></i>
+                                        </button>
+                                        {% if is_admin %}
+                                        <button type="button" class="btn btn-outline-danger btn-sm btn-delete-user" 
+                        data-user-id="{{ utilisateur.id }}" data-user-name="{{ utilisateur.prenom }} {{ utilisateur.nom }}" title="Supprimer">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-toggle-blacklist {{ utilisateur.blackliste|yesno:'btn-warning,btn-outline-warning' }}" 
+                        data-user-id="{{ utilisateur.id }}" data-blackliste="{{ utilisateur.blackliste|yesno:'true,false' }}" title="{{ utilisateur.blackliste|yesno:'Retirer de la blacklist,Blacklister' }}">
+                                            <i class="fas fa-ban"></i>
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-user-slash fa-4x text-muted mb-3"></i>
+                    <h4 class="text-muted">Aucun utilisateur trouvé</h4>
+                    {% if search_query %}
+                    <p class="text-muted">Aucun résultat pour votre recherche. <a href="{% url 'utilisateurs' %}">Voir tous les utilisateurs</a></p>
+                    {% else %}
+                    <p class="text-muted">Commencez par enregistrer des utilisateurs via le lecteur NFC sur la page d'accueil.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de modification d'utilisateur -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-edit me-2"></i>
+                    Modifier l'utilisateur
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editUserForm">
+                <div class="modal-body">
+                    <input type="hidden" id="editUserId" name="user_id">
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="editNom" class="form-label">Nom *</label>
+                            <input type="text" class="form-control" id="editNom" name="nom" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="editPrenom" class="form-label">Prénom *</label>
+                            <input type="text" class="form-control" id="editPrenom" name="prenom" required>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editDateNaissance" class="form-label">Date de naissance *</label>
+                        <input type="date" class="form-control" id="editDateNaissance" name="date_naissance" required>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="editLieuNaissance" class="form-label">Lieu de naissance *</label>
+                            <input type="text" class="form-control" id="editLieuNaissance" name="lieu_naissance" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="editDepartementPays" class="form-label">Département/Pays *</label>
+                            <input type="text" class="form-control" id="editDepartementPays" name="departement_pays" required placeholder="Ex: 83/Var">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editNationalite" class="form-label">Nationalité *</label>
+                        <input type="text" class="form-control" id="editNationalite" name="nationalite" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editSocieteRaison" class="form-label">Société/Raison de la visite *</label>
+                        <input type="text" class="form-control" id="editSocieteRaison" name="societe_raison" required>
+                    </div>
+                    
+                    <small class="text-muted">* Tous les champs seront automatiquement convertis en majuscules</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i>
+                        Sauvegarder
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Import Validé -->
+<div class="modal fade" id="importExcelModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-file-import me-2"></i> Importer des utilisateurs validés depuis Excel</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="importExcelForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Fichier Excel (.xlsx)</label>
+                        <input type="file" class="form-control" name="file" accept=".xlsx" required>
+                        <div class="form-text">En-têtes requis: uid_carte (optionnel), nom, prenom, date_naissance, lieu_naissance, departement_pays, nationalite, societe_raison.</div>
+                    </div>
+                    <div class="text-muted small">Les utilisateurs importés seront validés automatiquement. Si un UID existe déjà, l'utilisateur sera mis à jour.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-upload me-2"></i> Importer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Import En Attente -->
+<div class="modal fade" id="importExcelAttenteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="fas fa-file-import me-2"></i> Importer des utilisateurs en attente de validation</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="importExcelAttenteForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Fichier Excel (.xlsx)</label>
+                        <input type="file" class="form-control" name="file" accept=".xlsx" required>
+                        <div class="form-text">En-têtes requis: uid_carte (optionnel), nom, prenom, date_naissance, lieu_naissance, departement_pays, nationalite, societe_raison.</div>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Les utilisateurs importés seront en <strong>attente de validation</strong> et devront être validés manuellement avant de pouvoir accéder aux locaux.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <button type="submit" class="btn btn-warning"><i class="fas fa-upload me-2"></i> Importer en attente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Lier un Badge -->
+<div class="modal fade" id="linkCardModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-link me-2"></i> Lier un badge</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="linkCardScanning" class="d-flex align-items-center gap-3">
+                    <div class="spinner-border text-success" role="status"><span class="visually-hidden">...</span></div>
+                    <div>
+                        <div class="fw-semibold">En attente d'un badge NFC...</div>
+                        <div class="text-muted small">Posez le badge sur le lecteur pour continuer.</div>
+                    </div>
+                </div>
+                <div id="linkCardDetected" class="d-none">
+                    <p class="mb-1">Badge détecté: <strong><span id="detectedUid"></span></strong></p>
+                    <p class="mb-0"><span id="detectedMessage"></span></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+<!-- Modal Info Aide Utilisateurs -->
+<div class="modal fade" id="infoUtilisateursModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title d-flex align-items-center"><i class="fas fa-circle-info me-2"></i> Aide Gestion des Utilisateurs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <h6>Validation des utilisateurs</h6>
+                        <ul class="mb-0 ps-3">
+                            <li><span class="badge bg-warning text-dark">En attente</span> : utilisateurs nécessitant validation avant accès.</li>
+                            <li>Actions : <strong>Valider</strong> (autoriser l'accès) ou <strong>Refuser</strong> (blacklister).</li>
+                            <li>Les utilisateurs validés apparaissent dans le tableau principal.</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Gestion des badges</h6>
+                        <ul class="mb-0 ps-3">
+                            <li><strong>Lier un badge</strong> : associer un nouveau badge NFC à un utilisateur existant.</li>
+                            <li><strong>Détacher</strong> : retirer la liaison badge ↔ utilisateur.</li>
+                            <li>Un utilisateur peut avoir plusieurs profils mais un seul badge personnel à la fois.</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Import Validé</h6>
+                        <ul class="mb-0 ps-3">
+                            <li>Importer des utilisateurs <strong>directement validés</strong> depuis un fichier Excel (.xlsx).</li>
+                            <li>Colonnes requises : nom, prénom, date_naissance, lieu_naissance, departement_pays, nationalité, societe_raison.</li>
+                            <li>Colonne uid_carte optionnelle (générée automatiquement si absente).</li>
+                            <li>Si un UID existe déjà, l'utilisateur sera mis à jour.</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Import en attente</h6>
+                        <ul class="mb-0 ps-3">
+                            <li>Même format que "Import Validé" mais les utilisateurs seront en <span class="badge bg-warning text-dark">attente de validation</span>.</li>
+                            <li>Utile pour importer des visiteurs ou prestataires nécessitant approbation.</li>
+                            <li>Validation manuelle requise avant accès aux locaux.</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-12">
+                        <h6>Autres actions</h6>
+                        <ul class="mb-0 ps-3">
+                            <li><strong>Export Excel</strong> : télécharger la liste complète des utilisateurs validés.</li>
+                            <li><strong>Blacklist</strong> : empêcher définitivement l'accès d'un utilisateur (badge refusé).</li>
+                            <li><strong>Modifier</strong> : mettre à jour les informations d'un utilisateur.</li>
+                            <li><strong>Supprimer</strong> : retirer définitivement un utilisateur et son historique.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Filtrage live du tableau des utilisateurs
+function normaliserTexte(t) {
+    return (t || '').toString().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+// Filtre pour le tableau des utilisateurs validés
+function appliquerFiltreValide(q) {
+    const tbody = document.querySelector('#usersTable tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const tokens = normaliserTexte(q).split(/\s+/).filter(Boolean);
+    rows.forEach(tr => {
+        const cells = tr.querySelectorAll('td');
+        // concaténer tout sauf colonne Actions (dernière)
+        const hay = normaliserTexte(Array.from(cells).slice(0, -1).map(td => td.textContent).join(' '));
+        const ok = tokens.every(t => hay.includes(t));
+        tr.style.display = tokens.length === 0 || ok ? '' : 'none';
+    });
+}
+
+// Filtre pour le tableau des utilisateurs en attente
+function appliquerFiltreAttente(q) {
+    const tbody = document.querySelector('#attenteTable tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const tokens = normaliserTexte(q).split(/\s+/).filter(Boolean);
+    rows.forEach(tr => {
+        const cells = tr.querySelectorAll('td');
+        // concaténer tout sauf colonne Actions (dernière si is_admin)
+        const hay = normaliserTexte(Array.from(cells).slice(0, -1).map(td => td.textContent).join(' '));
+        const ok = tokens.every(t => hay.includes(t));
+        tr.style.display = tokens.length === 0 || ok ? '' : 'none';
+    });
+}
+
+// Ancienne fonction pour compatibilité
+function appliquerFiltreUsers(q) {
+    appliquerFiltreValide(q);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Lier les boutons modifier/supprimer
+    document.querySelectorAll('.btn-edit-user').forEach(btn => {
+        btn.addEventListener('click', () => modifierUtilisateur(btn.dataset.userId));
+    });
+    document.querySelectorAll('.btn-delete-user').forEach(btn => {
+        btn.addEventListener('click', () => supprimerUtilisateur(btn.dataset.userId, btn.dataset.userName));
+    });
+    document.querySelectorAll('.btn-detach-card').forEach(btn => {
+        btn.addEventListener('click', () => detacherCarte(btn.dataset.userId, btn.dataset.userName));
+    });
+    document.querySelectorAll('.btn-toggle-blacklist').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.userId;
+            try {
+                const res = await makeAjaxRequest(`/api/utilisateur/${id}/blacklist/`, 'POST');
+                const data = await res.json();
+                if (data.success) {
+                    showAlert(data.message, data.blackliste ? 'danger' : 'primary');
+                    setTimeout(()=> location.reload(), 800);
+                } else {
+                    showAlert(data.message, 'danger');
+                }
+            } catch (e) {
+                showAlert('Erreur lors de la mise à jour du blacklist', 'danger');
+            }
+        });
+    });
+
+    // Boutons valider/refuser pour les utilisateurs en attente
+    document.querySelectorAll('.btn-valider-user').forEach(btn => {
+        btn.addEventListener('click', () => validerUtilisateur(btn.dataset.userId, btn.dataset.userName));
+    });
+    document.querySelectorAll('.btn-refuser-user').forEach(btn => {
+        btn.addEventListener('click', () => refuserUtilisateur(btn.dataset.userId, btn.dataset.userName));
+    });
+
+    // Recherche live pour tableau des utilisateurs en attente
+    const attenteInput = document.getElementById('attenteSearch');
+    const attenteClrBtn = document.getElementById('clearAttenteSearch');
+    if (attenteInput) attenteInput.addEventListener('input', (e)=> appliquerFiltreAttente(e.target.value));
+    if (attenteClrBtn && attenteInput) attenteClrBtn.addEventListener('click', ()=> { attenteInput.value=''; appliquerFiltreAttente(''); attenteInput.focus(); });
+
+    // Recherche live pour tableau des utilisateurs validés
+    const valideInput = document.getElementById('valideSearch');
+    const valideClrBtn = document.getElementById('clearValideSearch');
+    if (valideInput) valideInput.addEventListener('input', (e)=> appliquerFiltreValide(e.target.value));
+    if (valideClrBtn && valideInput) valideClrBtn.addEventListener('click', ()=> { valideInput.value=''; appliquerFiltreValide(''); valideInput.focus(); });
+
+    // Lier un badge
+    let linkCardInterval = null;
+    const linkModalEl = document.getElementById('linkCardModal');
+    const linkModal = new bootstrap.Modal(linkModalEl);
+    const scanning = document.getElementById('linkCardScanning');
+    const detected = document.getElementById('linkCardDetected');
+    const detectedUidEl = document.getElementById('detectedUid');
+    const detectedMsgEl = document.getElementById('detectedMessage');
+    let currentUserId = null;
+    let currentUserName = '';
+
+    function stopLinkPolling(){ if (linkCardInterval){ clearInterval(linkCardInterval); linkCardInterval=null; } }
+    linkModalEl.addEventListener('hidden.bs.modal', stopLinkPolling);
+
+    document.querySelectorAll('.btn-link-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentUserId = btn.dataset.userId;
+            currentUserName = btn.dataset.userName;
+            scanning.classList.remove('d-none');
+            detected.classList.add('d-none');
+            detectedUidEl.textContent = '';
+            detectedMsgEl.textContent = '';
+            linkModal.show();
+            stopLinkPolling();
+            linkCardInterval = setInterval(async ()=>{
+                try {
+                    const r = await fetch('/api/nfc/read-uid/');
+                    const d = await r.json();
+                    if (d && d.success && d.uid){
+                        stopLinkPolling();
+                        scanning.classList.add('d-none');
+                        detected.classList.remove('d-none');
+                        detectedUidEl.textContent = d.uid;
+
+                        // Vérifier statut: si déjà lié à quelqu'un d'autre, bloquer sans demander confirmation
+                        if (d.status === 'user_linked' && d.linked_user && String(d.linked_user.id) !== String(currentUserId)){
+                            const who = `${d.linked_user.prenom} ${d.linked_user.nom}`;
+                            detectedMsgEl.textContent = `Badge déjà lié à ${who}`;
+                            showAlert(`Badge déjà lié à ${who}`, 'warning');
+                            setTimeout(()=> linkModal.hide(), 900);
+                            return;
+                        }
+                        // Si déjà lié à la même personne, informer et fermer
+                        if (d.status === 'user_linked' && d.linked_user && String(d.linked_user.id) === String(currentUserId)){
+                            detectedMsgEl.textContent = `Badge déjà lié à ${currentUserName}`;
+                            showAlert(`Ce badge est déjà lié à ${currentUserName}`, 'primary');
+                            setTimeout(()=> linkModal.hide(), 900);
+                            return;
+                        }
+                        // Badge visiteur: bloquer
+                        if (d.status === 'visitor_assigned' && d.linked_user){
+                            const who = `${d.linked_user.prenom} ${d.linked_user.nom}`;
+                            detectedMsgEl.textContent = `Badge visiteur affecté à ${who}`;
+                            showAlert(`Badge visiteur affecté à ${who}`, 'warning');
+                            setTimeout(()=> linkModal.hide(), 1200);
+                            return;
+                        }
+                        if (d.status === 'visitor_free'){
+                            detectedMsgEl.textContent = 'Cet UID correspond à un badge visiteur non affecté';
+                            showAlert('Cet UID correspond à un badge visiteur. Utilisez la gestion des visiteurs.', 'warning');
+                            setTimeout(()=> linkModal.hide(), 1200);
+                            return;
+                        }
+
+                        // Statut inconnu: demander confirmation et tenter la liaison
+                        const ok = await showConfirm({
+                            title: 'Confirmation',
+                            message: `Voulez-vous lier le badge <strong>${d.uid}</strong> à <strong>${currentUserName}</strong> ?`,
+                            confirmText: 'Lier',
+                            confirmVariant: 'success'
+                        });
+                        if (!ok){ linkModal.hide(); return; }
+
+                        const res = await fetch(`/api/utilisateur/${currentUserId}/lier-carte/`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
+                            body: JSON.stringify({ uid: d.uid })
+                        });
+                        const out = await res.json();
+                        if (out.success){
+                            showAlert(out.message || 'Badge lié', 'success');
+                            linkModal.hide();
+                            setTimeout(()=> location.reload(), 900);
+                        } else {
+                            if (out.code === 'ALREADY_LINKED' || out.code === 'VISITOR_ASSIGNED') {
+                                showAlert(out.message, 'warning');
+                            } else if (out.code === 'VISITOR_BADGE') {
+                                showAlert('Cet UID correspond à un badge visiteur. Utilisez la gestion des visiteurs.', 'warning');
+                            } else {
+                                showAlert(out.message || 'Impossible de lier le badge', 'danger');
+                            }
+                            detectedMsgEl.textContent = out.message || '';
+                        }
+                    }
+                } catch (e) { /* ignore et continue */ }
+            }, 700);
+        });
+    });
+});
+// Fonction pour modifier un utilisateur
+async function modifierUtilisateur(userId) {
+    try {
+        // Récupérer les données de l'utilisateur
+        const response = await fetch(`/api/utilisateur/${userId}/`);
+        const result = await response.json();
+        
+        if (result.success) {
+            // Remplir le formulaire
+            document.getElementById('editUserId').value = userId;
+            document.getElementById('editNom').value = result.data.nom;
+            document.getElementById('editPrenom').value = result.data.prenom;
+            document.getElementById('editDateNaissance').value = result.data.date_naissance;
+            document.getElementById('editLieuNaissance').value = result.data.lieu_naissance;
+            document.getElementById('editDepartementPays').value = result.data.departement_pays || '';
+            document.getElementById('editNationalite').value = result.data.nationalite;
+            document.getElementById('editSocieteRaison').value = result.data.societe_raison || '';
+            
+            // Ouvrir le modal
+            const modal = new bootstrap.Modal(document.getElementById('editUserModal'));
+            modal.show();
+        } else {
+            showAlert(result.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors du chargement des données', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Gestionnaire du formulaire de modification
+document.getElementById('editUserForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    e.stopPropagation(); // éviter le fade-out global sur submit
+    
+    const userId = document.getElementById('editUserId').value;
+    const formData = new FormData(this);
+    const data = {};
+    
+    for (let [key, value] of formData.entries()) {
+        if (key !== 'user_id') {
+            data[key] = value;
+        }
+    }
+    
+    try {
+        const response = await makeAjaxRequest(`/api/utilisateur/${userId}/modifier/`, 'POST', data);
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert(result.message, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(result.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de la modification', 'danger');
+        console.error('Erreur:', error);
+    }
+});
+
+// Fonction pour supprimer un utilisateur
+// Import Validé
+document.getElementById('importExcelForm').addEventListener('submit', async function(e){
+    e.preventDefault();
+    e.stopPropagation(); // éviter le fade-out global sur submit
+    // s'assurer que la page reste visible si un fade a été déclenché
+    try { document.body.classList.remove('page-leave'); } catch(_) {}
+    const form = e.target;
+    const fd = new FormData(form);
+    try {
+        const res = await fetch('/api/import/utilisateurs/', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+            const msg = `${data.message}${data.errors && data.errors.length ? ' (avec erreurs: ' + data.errors.length + ')' : ''}`;
+            showAlert(msg, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();
+            setTimeout(()=> location.reload(), 1200);
+        } else {
+            showAlert(data.message || 'Import échoué', 'danger');
+        }
+    } catch (err) {
+        showAlert('Erreur réseau lors de l\'import', 'danger');
+    }
+});
+
+// Import En Attente
+document.getElementById('importExcelAttenteForm').addEventListener('submit', async function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    try { document.body.classList.remove('page-leave'); } catch(_) {}
+    const form = e.target;
+    const fd = new FormData(form);
+    try {
+        const res = await fetch('/api/import/utilisateurs-attente/', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+            const msg = `${data.message}${data.errors && data.errors.length ? ' (avec erreurs: ' + data.errors.length + ')' : ''}`;
+            showAlert(msg, 'warning');
+            bootstrap.Modal.getInstance(document.getElementById('importExcelAttenteModal')).hide();
+            setTimeout(()=> location.reload(), 1200);
+        } else {
+            showAlert(data.message || 'Import échoué', 'danger');
+        }
+    } catch (err) {
+        showAlert('Erreur réseau lors de l\'import', 'danger');
+    }
+});
+
+async function supprimerUtilisateur(userId, userName) {
+    const ok = await showConfirm({
+        title: 'Supprimer l\'utilisateur',
+        message: `Êtes-vous sûr de vouloir supprimer l\'utilisateur <strong>${userName}</strong> ?<br><small class="text-muted">Cette action est irréversible et supprimera aussi l\'historique associé.</small>`,
+        confirmText: 'Supprimer',
+        confirmVariant: 'danger'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest(`/api/utilisateur/${userId}/supprimer/`, 'POST');
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de la suppression', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Fonction pour détacher la carte personnelle d'un utilisateur
+async function detacherCarte(userId, userName) {
+    const ok = await showConfirm({
+        title: "Détacher la carte",
+        message: `L'utilisateur <strong>${userName}</strong> ne sera plus lié à sa carte actuelle. Continuer ?<br><small class="text-muted">L'utilisateur pourra toujours être affecté à un badge visiteur.</small>`,
+        confirmText: 'Détacher',
+        confirmVariant: 'secondary'
+    });
+    if (!ok) return;
+    try {
+        const response = await makeAjaxRequest(`/api/utilisateur/${userId}/detacher-carte/`, 'POST');
+        const data = await response.json();
+        if (data.success) {
+            showAlert(data.message, 'secondary');
+            setTimeout(() => { location.reload(); }, 1000);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert("Erreur lors du détachement de la carte", 'danger');
+    }
+}
+
+// Fonction pour supprimer tous les utilisateurs
+async function supprimerTousUtilisateurs() {
+    const ok = await showConfirm({
+        title: 'Supprimer TOUS les utilisateurs',
+        message: '⚠️ Cette action est <strong>IRRÉVERSIBLE</strong> et supprimera:<br>- Tous les utilisateurs<br>- Tout l\'historique des présences',
+        confirmText: 'Supprimer tout',
+        confirmVariant: 'danger'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest('{% url "supprimer_tous_utilisateurs" %}', 'POST');
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 2000);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de la suppression', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Fonction pour valider un utilisateur en attente
+async function validerUtilisateur(userId, userName) {
+    const ok = await showConfirm({
+        title: 'Valider l\'utilisateur',
+        message: `Voulez-vous valider l\'utilisateur <strong>${userName}</strong> ?<br><small class="text-muted">Il pourra alors utiliser son badge pour les entrées/sorties.</small>`,
+        confirmText: 'Valider',
+        confirmVariant: 'success'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest(`/api/utilisateur/${userId}/valider/`, 'POST');
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors de la validation', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+// Fonction pour refuser un utilisateur en attente
+async function refuserUtilisateur(userId, userName) {
+    const ok = await showConfirm({
+        title: 'Refuser l\'utilisateur',
+        message: `Voulez-vous refuser l\'utilisateur <strong>${userName}</strong> ?<br><small class="text-muted">Il sera blacklisté et ne pourra pas accéder aux locaux.</small>`,
+        confirmText: 'Refuser',
+        confirmVariant: 'danger'
+    });
+    if (!ok) return;
+    
+    try {
+        const response = await makeAjaxRequest(`/api/utilisateur/${userId}/refuser/`, 'POST');
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'warning');
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+    } catch (error) {
+        showAlert('Erreur lors du refus', 'danger');
+        console.error('Erreur:', error);
+    }
+}
+
+</script>
+{% endblock %}

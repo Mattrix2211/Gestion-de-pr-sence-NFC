@@ -1,0 +1,500 @@
+{% extends 'presence/base.html' %}
+{% load static %}
+
+{% block title %}Statistiques - Gestion de Présence{% endblock %}
+{% block page_title %}Statistiques{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2 py-2">
+        <h6 class="mb-0 d-flex align-items-center"><i class="fas fa-chart-line me-2"></i>Statistiques</h6>
+        <form method="get" class="d-flex align-items-center gap-2">
+          <div class="input-group input-group-sm" style="min-width: 240px;">
+            <span class="input-group-text"><i class="fas fa-building"></i></span>
+            <select name="entreprise" class="form-select" onchange="this.form.submit()">
+              <option value="">Toutes les Sociétés/Raisons</option>
+              {% for e in entreprises %}
+                <option value="{{ e }}" {% if selected_entreprise == e %}selected{% endif %}>{{ e }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="card-body">
+        <div class="row g-4">
+          <div class="col-12">
+            <h6 class="mb-2">Entrées vs Sorties (24h)
+              <i class="fas fa-info-circle ms-1 text-muted" data-bs-toggle="tooltip" title="Nombre d’entrées et de sorties par heure sur les dernières 24h."></i>
+            </h6>
+            <canvas id="chartPerHour" height="120"></canvas>
+            <div class="text-muted small mt-1"></div>
+          </div>
+          <div class="col-12">
+            <h6 class="mb-2">Présents cumulés (24h)
+              <i class="fas fa-info-circle ms-1 text-muted" data-bs-toggle="tooltip" title="Cumul sur 24h: entrées − sorties, heure par heure. Permet d’estimer le nombre de personnes présentes au fil de la journée."></i>
+            </h6>
+            <canvas id="chartPresentCum" height="120"></canvas>
+            <div class="text-muted small mt-1"></div>
+          </div>
+          <div class="col-12">
+            <h6 class="mb-2">Activité des 7 derniers jours
+              <i class="fas fa-info-circle ms-1 text-muted" data-bs-toggle="tooltip" title="Total d’entrées et de sorties par jour sur les 7 derniers jours."></i>
+            </h6>
+            <canvas id="chartLast7" height="120"></canvas>
+            <div class="text-muted small mt-1"></div>
+          </div>
+          <div class="col-12">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h6 class="mb-0">Heatmap d’activité (7 jours × 24h)
+                <i class="fas fa-info-circle ms-1 text-muted" data-bs-toggle="tooltip" title="Jours à gauche, heures en haut. Plus la case est foncée, plus il y a eu d’événements (Total/Entrées/Sorties). Palette: vert → jaune → orange → rouge → noir."></i>
+              </h6>
+              <div class="ms-auto d-flex align-items-center gap-2">
+                <label for="heatMode" class="small text-muted mb-0">Donnée</label>
+                <select id="heatMode" class="form-select form-select-sm" style="width:auto;">
+                  <option value="t" selected>Total (Entrées + Sorties)</option>
+                  <option value="e">Entrées</option>
+                  <option value="s">Sorties</option>
+                </select>
+              </div>
+            </div>
+            <canvas id="chartHeatmap" height="520"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ stats|json_script:"stats-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/chart.min.js' %}"></script>
+<script>
+(function(){
+  if (typeof Chart === 'undefined') { return; }
+  const stats = JSON.parse(document.getElementById('stats-data').textContent);
+  const nowHour = new Date().getHours();
+  // Labels dynamiques: dernières 24h (gauche = il y a 23h, droite = heure courante)
+  function buildRollingLabels24(){
+    const now = new Date();
+    const floor = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
+    const out = [];
+    for (let i=23;i>=0;i--) {
+      const d = new Date(floor.getTime() - (i*60*60*1000));
+      const hh = d.getHours().toString().padStart(2,'0');
+      out.push(`${hh}:00`);
+    }
+    return out;
+  }
+  let labels24 = buildRollingLabels24(); // utilisé pour les deux graphes 24h (défilants)
+  const hourLabelsStatic = Array.from({length:24}, (_,i)=> (i.toString().padStart(2,'0')+':00')); // pour la heatmap
+
+  // Helpers pour échelles "sympas" (entiers, marge, auto-adaptation)
+  function computeScale(maxVal){
+    let m = Math.max(0, Number(maxVal) || 0);
+    if (m === 0) return { max: 5, step: 1 };
+    // seuils simples
+    const rules = [
+      {limit: 5, step: 1},
+      {limit: 10, step: 1},
+      {limit: 20, step: 2},
+      {limit: 50, step: 5},
+      {limit: 100, step: 10},
+      {limit: 200, step: 20},
+      {limit: 500, step: 50}
+    ];
+    for (const r of rules){ if (m <= r.limit){
+      const maxRounded = Math.ceil(m / r.step) * r.step + r.step; // un cran de marge
+      return { max: maxRounded, step: r.step };
+    }}
+    // au-delà: approx ~6-8 ticks
+    const magnitude = Math.pow(10, Math.floor(Math.log10(m)));
+    let step = Math.ceil((m / 6) / magnitude) * magnitude; // un pas "grossier"
+    // normaliser le pas vers 1, 2, 5 * magnitude
+    const base = m / 6;
+    const candidates = [1,2,5,10].map(k=> k * magnitude);
+    for (const c of candidates){ if (c >= base){ step = c; break; } }
+    const maxRounded = Math.ceil(m / step) * step + step;
+    return { max: maxRounded, step };
+  }
+  
+
+  // 24h Entrées / Sorties
+  const ctxHour = document.getElementById('chartPerHour');
+  let chartHour = null;
+  if (ctxHour) {
+    const maxPerHour = Math.max(
+      ...stats.per_hour_entrees.map(Number),
+      ...stats.per_hour_sorties.map(Number)
+    );
+    const scaleH = computeScale(maxPerHour);
+  chartHour = new Chart(ctxHour, {
+      type: 'line',
+      data: {
+  labels: labels24,
+        datasets: [
+          { label: 'Entrées', data: stats.per_hour_entrees, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.12)', tension: 0.3, pointRadius: 2, fill: true },
+          { label: 'Sorties', data: stats.per_hour_sorties, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.12)', tension: 0.3, pointRadius: 2, fill: true }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}` } }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax: scaleH.max,
+            grace: '5%',
+            ticks: { stepSize: scaleH.step, precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  // Présents cumulés
+  const ctxCum = document.getElementById('chartPresentCum');
+  let chartCum = null;
+  if (ctxCum) {
+    const maxCum = Math.max(...stats.presents_cum.map(Number));
+    const scaleC = computeScale(maxCum);
+  chartCum = new Chart(ctxCum, {
+      type: 'line',
+      data: {
+  labels: labels24,
+        datasets: [
+          { label: 'Présents cumulés', data: stats.presents_cum, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.12)', tension: 0.3, pointRadius: 2, fill: true }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}` } }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax: scaleC.max,
+            grace: '5%',
+            ticks: { stepSize: scaleC.step, precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  // Auto-avance des graphes à chaque changement d'heure
+  function scheduleNextHourTick(){
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()+1, 0, 0, 0);
+    const ms = Math.max(1000, next - now);
+    setTimeout(()=>{
+      labels24 = buildRollingLabels24();
+      if (chartHour){ chartHour.data.labels = labels24; chartHour.update(); }
+      if (chartCum){ chartCum.data.labels = labels24; chartCum.update(); }
+      scheduleNextHourTick();
+    }, ms);
+  }
+  scheduleNextHourTick();
+
+  // 7 derniers jours
+  const ctx7 = document.getElementById('chartLast7');
+  if (ctx7) {
+    const max7 = Math.max(
+      ...stats.last7_entrees.map(Number),
+      ...stats.last7_sorties.map(Number)
+    );
+    const scale7 = computeScale(max7);
+    new Chart(ctx7, {
+      type: 'line',
+      data: {
+        labels: stats.last7_labels,
+        datasets: [
+          { label: 'Entrées', data: stats.last7_entrees, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.12)', tension: 0.3, pointRadius: 2, fill: true },
+          { label: 'Sorties', data: stats.last7_sorties, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.12)', tension: 0.3, pointRadius: 2, fill: true }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}` } }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax: scale7.max,
+            grace: '5%',
+            ticks: { stepSize: scale7.step, precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  // Heatmap jours × heures (rendue en local, sans plugin)
+  const canvasHM = document.getElementById('chartHeatmap');
+  if (canvasHM && stats.heatmap_data && stats.heatmap_days) {
+    const dayLabels = stats.heatmap_days; // 7 jours
+    const hourLabels = hourLabelsStatic; // 00..23 fixes pour la heatmap
+    const heatState = { mode: 't' };
+
+    function valueOf(d){ return heatState.mode === 'e' ? d.e : heatState.mode === 's' ? d.s : (d.t ?? 0); }
+    function vmaxOf(){ let m = 1; for(const d of stats.heatmap_data) m = Math.max(m, valueOf(d)); return m; }
+    // Localiser les jours en français si fournis en anglais
+    const dayMap = {Mon:'Lun',Tue:'Mar',Wed:'Mer',Thu:'Jeu',Fri:'Ven',Sat:'Sam',Sun:'Dim'};
+    const monthMap = {Jan:'janv.',Feb:'févr.',Mar:'mars',Apr:'avr.',May:'mai',Jun:'juin',Jul:'juil.',Aug:'août',Sep:'sept.',Oct:'oct.',Nov:'nov.',Dec:'déc.'};
+    function frLabel(label){
+      // Remplace les abréviations anglaises au début et les mois éventuels
+      let out = label.replace(/^([A-Za-z]{3})\b/, (m,p)=> dayMap[p] || m);
+      out = out.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, (m)=> monthMap[m] || m);
+      return out;
+    }
+    const dayLabelsFr = dayLabels.map(frLabel);
+
+  // Indexation rapide des cellules (row-col -> données)
+  const cellMap = new Map();
+  stats.heatmap_data.forEach(d => cellMap.set(`${d.x}-${d.y}`, d));
+
+    // Palette multi-couleurs: vert → jaune → orange → rouge → noir
+    function hexToRgb(h){ const n=h.replace('#',''); return {r:parseInt(n.substring(0,2),16), g:parseInt(n.substring(2,4),16), b:parseInt(n.substring(4,6),16)}; }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function lerpColor(c1,c2,t){ return { r: Math.round(lerp(c1.r,c2.r,t)), g: Math.round(lerp(c1.g,c2.g,t)), b: Math.round(lerp(c1.b,c2.b,t))}; }
+    const stops = [
+      {p:0.00, c:'#ffffff'}, // blanc
+      {p:0.25, c:'#84cc16'}, // vert
+      {p:0.50, c:'#fde047'}, // jaune
+      {p:0.75, c:'#f97316'}, // orange
+      {p:0.90, c:'#ef4444'}, // rouge
+      {p:1.00, c:'#000000'}  // noir
+    ].map(s=>({p:s.p, c:hexToRgb(s.c)}));
+    function palette(t){
+      if (t<=0) return stops[0].c; if (t>=1) return stops[stops.length-1].c;
+      for (let i=0;i<stops.length-1;i++){
+        const a=stops[i], b=stops[i+1];
+        if (t>=a.p && t<=b.p){ const tt=(t-a.p)/(b.p-a.p); return lerpColor(a.c,b.c,tt); }
+      }
+      return stops[stops.length-1].c;
+    }
+    function colorFor(v, vmax){ const t = vmax ? (v / vmax) : 0; const c = palette(Math.max(0,Math.min(1,t))); return `rgb(${c.r},${c.g},${c.b})`; }
+
+  function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      // Largeur basée sur le parent pour utiliser tout l’espace disponible
+  const parentRect = canvasHM.parentElement.getBoundingClientRect();
+  const W = Math.max(320, parentRect.width);
+      // Marges adaptées à l'orientation demandée (jours à gauche, heures en haut)
+      const marginLeft = 120, marginTop = 96, marginRight = 16, marginBottom = 48;
+      const cols = hourLabels.length; // colonnes = heures
+      const rows = dayLabelsFr.length; // lignes = jours
+      const innerW = W - marginLeft - marginRight;
+      const cw = innerW / cols;
+      // Hauteur de cellule en fonction de la largeur pour un rendu aéré
+      const ch = Math.max(26, Math.min(42, cw * 0.8));
+      const innerH = rows * ch;
+      const H = Math.max(200, marginTop + innerH + marginBottom);
+  // Fixe les tailles CSS pour refléter la taille calculée (évite tout redimensionnement flou)
+  canvasHM.style.width = W + 'px';
+  canvasHM.style.height = H + 'px';
+      if (canvasHM.width !== Math.round(W * dpr)) canvasHM.width = Math.round(W * dpr);
+      if (canvasHM.height !== Math.round(H * dpr)) canvasHM.height = Math.round(H * dpr);
+      const ctx = canvasHM.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0,0,W,H);
+
+      // Recalcule l’innerH basé sur H (utile si styles externes changent)
+      // mais conserve ch/cw pour la géométrie des cases
+
+      const vmax = vmaxOf();
+      // Fond
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bs-body-bg') || '#fff';
+      ctx.fillRect(0,0,W,H);
+
+      // Surlignage doux: colonne de l'heure actuelle + ligne du jour courant
+      const todayRow = rows - 1; // dernier jour = aujourd'hui
+      const nowCol = nowHour; // 0..23
+      const hlFill = (document.documentElement.getAttribute('data-bs-theme') === 'dark') ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.035)';
+      ctx.fillStyle = hlFill;
+      // colonne actuelle
+      const colX = marginLeft + nowCol * cw;
+      ctx.fillRect(colX, marginTop, cw, innerH);
+      // ligne du jour
+      const rowY = marginTop + todayRow * ch;
+      ctx.fillRect(marginLeft, rowY, innerW, ch);
+
+      // Cases (x = heure, y = jour) avec coins arrondis et espacement
+      const cellGap = Math.min(4, Math.max(1, Math.floor(Math.min(cw, ch) * 0.08)));
+      const radius = Math.min(6, Math.max(2, Math.floor(Math.min(cw, ch) * 0.22)));
+      function roundRectPath(ctx2, x, y, w, h, r){
+        const rr = Math.min(r, w/2, h/2);
+        ctx2.beginPath();
+        ctx2.moveTo(x+rr, y);
+        ctx2.arcTo(x+w, y, x+w, y+h, rr);
+        ctx2.arcTo(x+w, y+h, x, y+h, rr);
+        ctx2.arcTo(x, y+h, x, y, rr);
+        ctx2.arcTo(x, y, x+w, y, rr);
+        ctx2.closePath();
+      }
+      for (const d of stats.heatmap_data) {
+        const v = valueOf(d);
+        const x = marginLeft + d.y * cw + cellGap/2; // heure
+        const y = marginTop + d.x * ch + cellGap/2; // jour
+        const ww = Math.max(1, cw - cellGap);
+        const hh = Math.max(1, ch - cellGap);
+        ctx.fillStyle = colorFor(v, vmax);
+        roundRectPath(ctx, x, y, ww, hh, radius);
+        ctx.fill();
+      }
+
+      // Grille légère (séparateurs jours/heures)
+      ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+      if (getComputedStyle(document.body).getPropertyValue('--bs-body-color')) {
+        // Adapter à la couleur du thème (approximation)
+        ctx.strokeStyle = (document.documentElement.getAttribute('data-bs-theme') === 'dark') ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+      }
+      // 1px net en tous DPI
+      ctx.lineWidth = 1 / dpr;
+      const HALF = 0.5 / dpr;
+      ctx.beginPath();
+      for (let i=0;i<=cols;i++) { // verticale chaque heure
+        const x = Math.round(marginLeft + i * cw) + HALF;
+        ctx.moveTo(x, marginTop);
+        ctx.lineTo(x, marginTop + innerH);
+      }
+      for (let j=0;j<=rows;j++) { // lignes séparant chaque jour
+        const y = Math.round(marginTop + j * ch) + HALF;
+        ctx.moveTo(marginLeft, y);
+        ctx.lineTo(marginLeft + innerW, y);
+      }
+      ctx.stroke();
+
+      // Pas de bordure autour de la heatmap pour éviter l'encadré noir en mode clair
+
+      // Axe X (heures)
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bs-body-color') || '#333';
+      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      // Toutes les heures; ajuste la taille de police selon la largeur de cellule
+      const baseFont = cw < 28 ? 10 : cw < 34 ? 11 : 12;
+      ctx.font = baseFont + 'px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      for (let i=0;i<cols;i++) {
+        const label = hourLabels[i];
+        const x = marginLeft + i * cw + cw/2;
+        const y = marginTop - 10;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(-Math.PI/4); // -45° pour lisibilité
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
+      // Axe Y (jours)
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      for (let j=0;j<rows;j++) {
+        const y = marginTop + j * ch + ch/2;
+        ctx.fillText(dayLabelsFr[j], marginLeft - 8, y);
+      }
+
+      // Légende (échelle de couleurs)
+      const steps = 6;
+      const legendW = 18, legendH = 10, gap = 6;
+  const legendX = marginLeft + innerW - (steps * (legendW+gap)) - 4;
+  const legendY = marginTop + innerH + 10;
+      const maxv = vmaxOf();
+      for (let s=0; s<steps; s++) {
+        const t = s/(steps-1);
+        const v = Math.round(maxv * t);
+        ctx.fillStyle = colorFor(v, maxv);
+        ctx.fillRect(legendX + s*(legendW+gap), legendY, legendW, legendH);
+      }
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bs-body-color') || '#333';
+      ctx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('0', legendX, legendY + legendH + 2);
+      ctx.textAlign = 'right';
+      ctx.fillText(String(maxv), legendX + (steps-1)*(legendW+gap) + legendW, legendY + legendH + 2);
+      ctx.textAlign = 'center';
+      ctx.fillText(String(Math.round(maxv/2)), legendX + ((steps-1)*(legendW+gap) + legendW)/2, legendY + legendH + 2);
+    }
+
+    // sélecteur
+    const modeSelect = document.getElementById('heatMode');
+    if (modeSelect) {
+      modeSelect.addEventListener('change', () => {
+        // petite animation de transition
+        canvasHM.style.transition = 'opacity .18s ease';
+        canvasHM.style.opacity = 0;
+        setTimeout(() => {
+          heatState.mode = modeSelect.value;
+          draw();
+          canvasHM.style.opacity = 1;
+        }, 90);
+      });
+    }
+    window.addEventListener('resize', draw);
+    draw();
+
+    // Tooltip au survol des cases
+    const tip = document.createElement('div');
+    tip.className = 'heatmap-tip';
+    tip.style.position = 'fixed';
+    tip.style.pointerEvents = 'none';
+    tip.style.zIndex = '2000';
+    tip.style.background = 'rgba(0,0,0,0.8)';
+    tip.style.color = '#fff';
+    tip.style.padding = '6px 8px';
+    tip.style.borderRadius = '6px';
+    tip.style.fontSize = '12px';
+    tip.style.opacity = '0';
+    tip.style.transform = 'translate(-50%,-120%)';
+    tip.style.transition = 'opacity .12s ease';
+    document.body.appendChild(tip);
+
+    function showTip(html, x, y){ tip.innerHTML = html; tip.style.left = x+'px'; tip.style.top = y+'px'; tip.style.opacity = '1'; }
+    function hideTip(){ tip.style.opacity = '0'; }
+
+    canvasHM.addEventListener('mousemove', (e) => {
+      const rect = canvasHM.getBoundingClientRect();
+      const parentRect2 = canvasHM.parentElement.getBoundingClientRect();
+      const W2 = Math.max(320, parentRect2.width);
+      const marginLeft = 120, marginTop = 96, marginRight = 16;
+      const cols = hourLabels.length;
+      const rows = dayLabelsFr.length;
+      const innerW2 = W2 - marginLeft - marginRight;
+      const cw2 = innerW2 / cols;
+      const ch2 = Math.max(26, Math.min(42, cw2 * 0.8));
+      const innerH2 = rows * ch2;
+
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const xRel = mx - marginLeft;
+      const yRel = my - marginTop;
+      if (xRel>=0 && yRel>=0 && xRel<innerW2 && yRel<innerH2) {
+        const col = Math.floor(xRel / cw2);
+        const row = Math.floor(yRel / ch2);
+        const d = cellMap.get(`${row}-${col}`) || {e:0,s:0,t:0};
+        const html = `<strong>${dayLabelsFr[row]}</strong><br>${hourLabels[col]} — Total: ${d.t} · E: ${d.e} · S: ${d.s}`;
+        showTip(html, e.clientX, e.clientY);
+      } else {
+        hideTip();
+      }
+    });
+    canvasHM.addEventListener('mouseleave', hideTip);
+  }
+})();
+</script>
+{% endblock %}
+
