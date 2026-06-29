@@ -26,23 +26,9 @@
         <div class="container">
             <!-- Logo : requin marteau + picto NFC overlay (DS §9) -->
             <a class="navbar-brand d-flex align-items-center ms-2 gap-2" href="{% url 'accueil' %}">
-                <div style="position:relative;display:inline-block;flex-shrink:0;">
-                    <img src="{% static 'img/logo.png' %}" alt="MK" height="52"
-                         style="object-fit:contain;"
-                         onerror="this.style.display='none';">
-                    <!-- Picto applicatif : 3 barres NFC — Signal #00B4D8 -->
-                    <svg style="position:absolute;bottom:-3px;right:-6px;width:22px;height:22px;"
-                         viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"
-                         aria-hidden="true">
-                        <path d="M7 14c0-3.866 3.134-7 7-7" stroke="#00B4D8" stroke-width="2.2"
-                              stroke-linecap="round"/>
-                        <path d="M4 14c0-5.523 4.477-10 10-10" stroke="#00B4D8" stroke-width="2.2"
-                              stroke-linecap="round" opacity=".65"/>
-                        <path d="M1 14C1 6.82 6.82 1 14 1" stroke="#00B4D8" stroke-width="2.2"
-                              stroke-linecap="round" opacity=".35"/>
-                        <circle cx="14" cy="14" r="2" fill="#00B4D8"/>
-                    </svg>
-                </div>
+                <img src="{% static 'img/logo.png' %}" alt="MK" height="52"
+                     style="object-fit:contain;flex-shrink:0;"
+                     onerror="this.style.display='none';">
                 <span class="fw-semibold" style="letter-spacing:-.01em;">{% block page_title %}Gestion de Présence{% endblock %}</span>
             </a>
 
